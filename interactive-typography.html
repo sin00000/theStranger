@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Stranger - Interactive Korean Typography</title>
+    <script src="https://cdn.jsdelivr.net/npm/hangul-js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Malgun Gothic', '맑은 고딕', sans-serif;
+            overflow: hidden;
+            background: #1a1a1a;
+        }
+
+        #canvas {
+            display: block;
+            cursor: pointer;
+        }
+
+        .info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #888;
+            font-size: 14px;
+            pointer-events: none;
+        }
+
+        .completion-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: white;
+            font-size: 24px;
+            text-align: center;
+            z-index: 10;
+        }
+
+        .completion-overlay.show {
+            display: flex;
+        }
+
+        .completion-message {
+            margin-bottom: 20px;
+            font-size: 16px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div class="info">
+        Click on floating letters to construct the sentence
+    </div>
+    <div class="completion-overlay" id="completionOverlay">
+        <div class="completion-message">Sentence completed</div>
+        <div id="completedSentence" style="cursor: pointer; font-size: 36px;"></div>
+    </div>
+
+    <script>
+        // ========================================
+        // CONFIGURATION
+        // ========================================
+        const SENTENCE = "오늘 엄마가 죽었다. 어쩌면 어제.";
+        const FLOATING_AREA_RATIO = 0.8; // 80% for floating, 20% for sentence area
+
+        const JAMO_CONFIG = {
+            floating: {
+                minSize: 60,
+                maxSize: 80,
+                weight: 700,
+                style: 'normal'
+            },
+            placed: {
+                size: 36,
+                weight: 300,
+                style: 'normal'
+            },
+            transition: {
+                duration: 30 // frames
+            }
+        };
+
+        // ========================================
+        // GLOBAL STATE
+        // ========================================
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+        let floatingAreaHeight, sentenceAreaTop;
+
+        // Data structures
+        let jamoMapping = {}; // jamo -> array of target positions
+        let syllableStates = []; // array of syllable objects
+        let floatingJamos = []; // array of floating jamo particles
+        let allJamosPlaced = false;
+
+        // ========================================
+        // INITIALIZATION
+        // ========================================
+        function init() {
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            canvas.addEventListener('click', handleClick);
+
+            // Step 1: Decompose sentence and create mappings
+            decomposeSentence();
+
+            // Step 2: Create floating jamo particles
+            createFloatingJamos();
+
+            // Step 3: Start animation loop
+            animate();
+
+            console.log('=== JAMO MAPPING ===');
+            console.log(jamoMapping);
+            console.log('\n=== SYLLABLE STATES ===');
+            console.log(syllableStates);
+        }
+
+        function resizeCanvas() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            floatingAreaHeight = height * FLOATING_AREA_RATIO;
+            sentenceAreaTop = floatingAreaHeight;
+        }
+
+        // ========================================
+        // HANGUL DECOMPOSITION & MAPPING
+        // ========================================
+        function decomposeSentence() {
+            jamoMapping = {};
+            syllableStates = [];
+            let syllableIndex = 0;
+
+            for (let i = 0; i < SENTENCE.length; i++) {
+                const char = SENTENCE[i];
+
+                // Handle spaces
+                if (char === ' ') {
+                    syllableStates.push({
+                        text: ' ',
+                        isSpace: true,
+                        isComplete: true
+                    });
+                    syllableIndex++;
+                    continue;
+                }
+
+                // Handle punctuation
+                if (char === '.' || char === ',') {
+                    syllableStates.push({
+                        text: char,
+                        isPunctuation: true,
+                        isComplete: true
+                    });
+                    syllableIndex++;
+                    continue;
+                }
+
+                // Handle Korean syllables
+                if (/[가-힣]/.test(char)) {
+                    const disassembled = Hangul.disassemble(char);
+
+                    const syllableState = {
+                        text: char,
+                        index: syllableIndex,
+                        initial: null,
+                        medial: null,
+                        final: null,
+                        isComplete: false,
+                        placedJamos: []
+                    };
+
+                    // Process initial consonant (초성)
+                    if (disassembled.length >= 1) {
+                        const initialJamo = disassembled[0];
+                        syllableState.initial = {
+                            jamo: initialJamo,
+                            filled: false,
+                            particle: null
+                        };
+
+                        if (!jamoMapping[initialJamo]) {
+                            jamoMapping[initialJamo] = [];
+                        }
+                        jamoMapping[initialJamo].push({
+                            syllableIndex: syllableIndex,
+                            syllable: char,
+                            position: 'initial',
+                            filled: false,
+                            stateRef: syllableState.initial
+                        });
+                    }
+
+                    // Process medial vowel (중성)
+                    if (disassembled.length >= 2) {
+                        const medialJamo = disassembled[1];
+                        syllableState.medial = {
+                            jamo: medialJamo,
+                            filled: false,
+                            particle: null
+                        };
+
+                        if (!jamoMapping[medialJamo]) {
+                            jamoMapping[medialJamo] = [];
+                        }
+                        jamoMapping[medialJamo].push({
+                            syllableIndex: syllableIndex,
+                            syllable: char,
+                            position: 'medial',
+                            filled: false,
+                            stateRef: syllableState.medial
+                        });
+                    }
+
+                    // Process final consonant (종성)
+                    if (disassembled.length >= 3) {
+                        const finalJamo = disassembled[2];
+                        syllableState.final = {
+                            jamo: finalJamo,
+                            filled: false,
+                            particle: null
+                        };
+
+                        if (!jamoMapping[finalJamo]) {
+                            jamoMapping[finalJamo] = [];
+                        }
+                        jamoMapping[finalJamo].push({
+                            syllableIndex: syllableIndex,
+                            syllable: char,
+                            position: 'final',
+                            filled: false,
+                            stateRef: syllableState.final
+                        });
+                    }
+
+                    syllableStates.push(syllableState);
+                    syllableIndex++;
+                }
+            }
+        }
+
+        // ========================================
+        // FLOATING JAMO PARTICLES
+        // ========================================
+        function createFloatingJamos() {
+            floatingJamos = [];
+            const uniqueJamos = Object.keys(jamoMapping);
+
+            uniqueJamos.forEach(jamo => {
+                const count = jamoMapping[jamo].length;
+
+                // Create one particle for each occurrence
+                for (let i = 0; i < count; i++) {
+                    const size = JAMO_CONFIG.floating.minSize +
+                                Math.random() * (JAMO_CONFIG.floating.maxSize - JAMO_CONFIG.floating.minSize);
+
+                    const particle = {
+                        jamo: jamo,
+                        x: Math.random() * width,
+                        y: Math.random() * floatingAreaHeight,
+                        vx: (Math.random() - 0.5) * 4,
+                        vy: (Math.random() - 0.5) * 4,
+                        size: size,
+                        weight: JAMO_CONFIG.floating.weight,
+                        rotation: (Math.random() - 0.5) * 0.2,
+                        isFloating: true,
+                        isTransitioning: false,
+                        transitionFrame: 0,
+                        targetX: 0,
+                        targetY: 0,
+                        targetSize: JAMO_CONFIG.placed.size,
+                        targetWeight: JAMO_CONFIG.placed.weight,
+                        targetRotation: 0,
+                        startX: 0,
+                        startY: 0,
+                        startSize: size,
+                        startWeight: JAMO_CONFIG.floating.weight,
+                        startRotation: 0
+                    };
+
+                    floatingJamos.push(particle);
+                }
+            });
+
+            console.log(`Created ${floatingJamos.length} floating jamo particles`);
+        }
+
+        // ========================================
+        // ANIMATION LOOP
+        // ========================================
+        function animate() {
+            ctx.clearRect(0, 0, width, height);
+
+            // Draw background division
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, width, floatingAreaHeight);
+
+            ctx.fillStyle = '#2a2a2a';
+            ctx.fillRect(0, sentenceAreaTop, width, height - sentenceAreaTop);
+
+            // Update and draw floating jamos
+            floatingJamos.forEach(particle => {
+                if (particle.isFloating) {
+                    updateFloatingParticle(particle);
+                } else if (particle.isTransitioning) {
+                    updateTransitioningParticle(particle);
+                }
+                drawJamo(particle);
+            });
+
+            // Draw sentence area
+            drawSentenceArea();
+
+            requestAnimationFrame(animate);
+        }
+
+        function updateFloatingParticle(particle) {
+            particle.x += particle.vx;
+            particle.y += particle.vy;
+
+            // Bounce off walls
+            if (particle.x < 0 || particle.x > width) {
+                particle.vx *= -1;
+                particle.x = Math.max(0, Math.min(width, particle.x));
+            }
+            if (particle.y < 0 || particle.y > floatingAreaHeight) {
+                particle.vy *= -1;
+                particle.y = Math.max(0, Math.min(floatingAreaHeight, particle.y));
+            }
+        }
+
+        function updateTransitioningParticle(particle) {
+            particle.transitionFrame++;
+            const progress = particle.transitionFrame / JAMO_CONFIG.transition.duration;
+            const eased = easeInOutCubic(progress);
+
+            if (progress >= 1) {
+                particle.x = particle.targetX;
+                particle.y = particle.targetY;
+                particle.size = particle.targetSize;
+                particle.weight = particle.targetWeight;
+                particle.rotation = particle.targetRotation;
+                particle.isTransitioning = false;
+            } else {
+                particle.x = lerp(particle.startX, particle.targetX, eased);
+                particle.y = lerp(particle.startY, particle.targetY, eased);
+                particle.size = lerp(particle.startSize, particle.targetSize, eased);
+                particle.weight = lerp(particle.startWeight, particle.targetWeight, eased);
+                particle.rotation = lerp(particle.startRotation, particle.targetRotation, eased);
+            }
+        }
+
+        function drawJamo(particle) {
+            ctx.save();
+            ctx.translate(particle.x, particle.y);
+            ctx.rotate(particle.rotation);
+
+            ctx.font = `${particle.weight} ${particle.size}px 'Malgun Gothic', sans-serif`;
+            ctx.fillStyle = particle.isFloating ? '#ffffff' : '#00ff88';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            // Add slight organic distortion for floating jamos
+            if (particle.isFloating) {
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = 'rgba(255, 255, 255, 0.3)';
+            }
+
+            ctx.fillText(particle.jamo, 0, 0);
+            ctx.restore();
+        }
+
+        // ========================================
+        // SENTENCE AREA RENDERING
+        // ========================================
+        function drawSentenceArea() {
+            const baseY = sentenceAreaTop + (height - sentenceAreaTop) / 2;
+            const syllableWidth = 50;
+            const syllableSpacing = 10;
+            const spaceWidth = 20;
+
+            // Calculate total width
+            let totalWidth = 0;
+            syllableStates.forEach(s => {
+                if (s.isSpace) totalWidth += spaceWidth;
+                else totalWidth += syllableWidth + syllableSpacing;
+            });
+
+            let currentX = (width - totalWidth) / 2;
+
+            syllableStates.forEach((syllable, idx) => {
+                if (syllable.isSpace) {
+                    currentX += spaceWidth;
+                    return;
+                }
+
+                if (syllable.isPunctuation) {
+                    ctx.font = '32px sans-serif';
+                    ctx.fillStyle = '#888';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(syllable.text, currentX, baseY);
+                    currentX += syllableWidth + syllableSpacing;
+                    return;
+                }
+
+                // Draw syllable box
+                const boxX = currentX;
+                const boxY = baseY - 25;
+                const boxWidth = syllableWidth;
+                const boxHeight = 50;
+
+                ctx.strokeStyle = syllable.isComplete ? '#00ff88' : '#444';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+
+                // Check if syllable is complete
+                checkSyllableCompletion(syllable);
+
+                // Draw assembled syllable or individual jamos
+                if (syllable.isComplete) {
+                    ctx.font = '32px sans-serif';
+                    ctx.fillStyle = '#00ff88';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(syllable.text, boxX + boxWidth / 2, baseY);
+                } else {
+                    // Draw placeholder positions
+                    drawJamoPositions(syllable, boxX, boxY, boxWidth, boxHeight);
+                }
+
+                currentX += syllableWidth + syllableSpacing;
+            });
+        }
+
+        function drawJamoPositions(syllable, x, y, w, h) {
+            const centerX = x + w / 2;
+            const centerY = y + h / 2;
+
+            // Position markers for initial, medial, final
+            if (syllable.initial) {
+                const posY = centerY - 10;
+                ctx.fillStyle = syllable.initial.filled ? '#00ff88' : '#333';
+                ctx.fillRect(centerX - 15, posY - 3, 10, 6);
+            }
+
+            if (syllable.medial) {
+                const posY = centerY;
+                ctx.fillStyle = syllable.medial.filled ? '#00ff88' : '#333';
+                ctx.fillRect(centerX, posY - 3, 10, 6);
+            }
+
+            if (syllable.final) {
+                const posY = centerY + 10;
+                ctx.fillStyle = syllable.final.filled ? '#00ff88' : '#333';
+                ctx.fillRect(centerX - 15, posY - 3, 10, 6);
+            }
+        }
+
+        function checkSyllableCompletion(syllable) {
+            if (syllable.isComplete) return;
+
+            const initialFilled = !syllable.initial || syllable.initial.filled;
+            const medialFilled = !syllable.medial || syllable.medial.filled;
+            const finalFilled = !syllable.final || syllable.final.filled;
+
+            if (initialFilled && medialFilled && finalFilled) {
+                syllable.isComplete = true;
+                checkAllJamosPlaced();
+            }
+        }
+
+        function checkAllJamosPlaced() {
+            const allComplete = syllableStates.every(s => s.isComplete);
+            if (allComplete && !allJamosPlaced) {
+                allJamosPlaced = true;
+                showCompletionOverlay();
+            }
+        }
+
+        function showCompletionOverlay() {
+            const overlay = document.getElementById('completionOverlay');
+            const sentenceEl = document.getElementById('completedSentence');
+            sentenceEl.textContent = SENTENCE;
+            overlay.classList.add('show');
+
+            sentenceEl.onclick = () => {
+                speakFullSentence();
+            };
+        }
+
+        // ========================================
+        // CLICK INTERACTION
+        // ========================================
+        function handleClick(event) {
+            if (allJamosPlaced) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+
+            // Find nearest floating jamo
+            let nearestParticle = null;
+            let nearestDist = Infinity;
+
+            floatingJamos.forEach(particle => {
+                if (!particle.isFloating) return;
+
+                const dx = particle.x - mouseX;
+                const dy = particle.y - mouseY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < nearestDist && dist < 100) { // Within 100px
+                    nearestDist = dist;
+                    nearestParticle = particle;
+                }
+            });
+
+            if (nearestParticle) {
+                placeJamo(nearestParticle);
+            }
+        }
+
+        function placeJamo(particle) {
+            const jamo = particle.jamo;
+            const targets = jamoMapping[jamo];
+
+            // Find first unfilled target
+            const target = targets.find(t => !t.filled);
+            if (!target) return;
+
+            // Mark as filled
+            target.filled = true;
+            target.stateRef.filled = true;
+            target.stateRef.particle = particle;
+
+            // Calculate target position
+            const syllableWidth = 50;
+            const syllableSpacing = 10;
+            const spaceWidth = 20;
+
+            let totalWidth = 0;
+            syllableStates.forEach(s => {
+                if (s.isSpace) totalWidth += spaceWidth;
+                else totalWidth += syllableWidth + syllableSpacing;
+            });
+
+            let currentX = (width - totalWidth) / 2;
+
+            for (let i = 0; i < target.syllableIndex; i++) {
+                if (syllableStates[i].isSpace) {
+                    currentX += spaceWidth;
+                } else {
+                    currentX += syllableWidth + syllableSpacing;
+                }
+            }
+
+            const baseY = sentenceAreaTop + (height - sentenceAreaTop) / 2;
+            const boxX = currentX;
+
+            // Position within syllable box
+            let offsetX = 0;
+            let offsetY = 0;
+
+            if (target.position === 'initial') {
+                offsetX = syllableWidth / 2 - 10;
+                offsetY = -10;
+            } else if (target.position === 'medial') {
+                offsetX = syllableWidth / 2 + 5;
+                offsetY = 0;
+            } else if (target.position === 'final') {
+                offsetX = syllableWidth / 2 - 10;
+                offsetY = 10;
+            }
+
+            // Start transition
+            particle.isFloating = false;
+            particle.isTransitioning = true;
+            particle.transitionFrame = 0;
+            particle.startX = particle.x;
+            particle.startY = particle.y;
+            particle.startSize = particle.size;
+            particle.startWeight = particle.weight;
+            particle.startRotation = particle.rotation;
+            particle.targetX = boxX + offsetX;
+            particle.targetY = baseY + offsetY;
+            particle.targetSize = JAMO_CONFIG.placed.size;
+            particle.targetWeight = JAMO_CONFIG.placed.weight;
+            particle.targetRotation = 0;
+
+            // Pronounce the jamo
+            speakJamo(jamo);
+        }
+
+        // ========================================
+        // WEB SPEECH API
+        // ========================================
+        function speakJamo(jamo) {
+            if (!window.speechSynthesis) return;
+
+            const utterance = new SpeechSynthesisUtterance(jamo);
+            utterance.lang = 'ko-KR';
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+
+            speechSynthesis.cancel(); // Cancel any ongoing speech
+            speechSynthesis.speak(utterance);
+        }
+
+        function speakFullSentence() {
+            if (!window.speechSynthesis) return;
+
+            const utterance = new SpeechSynthesisUtterance(SENTENCE);
+            utterance.lang = 'ko-KR';
+            utterance.rate = 0.9;
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+
+            speechSynthesis.cancel();
+            speechSynthesis.speak(utterance);
+        }
+
+        // ========================================
+        // UTILITY FUNCTIONS
+        // ========================================
+        function lerp(start, end, t) {
+            return start + (end - start) * t;
+        }
+
+        function easeInOutCubic(t) {
+            return t < 0.5
+                ? 4 * t * t * t
+                : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        }
+
+        // ========================================
+        // START APPLICATION
+        // ========================================
+        init();
+    </script>
+</body>
+</html>
