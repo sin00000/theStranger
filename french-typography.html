@@ -67,7 +67,7 @@
 <body>
     <canvas id="canvas"></canvas>
     <div class="info">
-        Click on floating letters to construct the sentence
+        DRAG to reposition • CLICK to place in sentence
     </div>
     <div class="completion-overlay" id="completionOverlay">
         <div class="completion-message">Sentence completed</div>
@@ -114,12 +114,24 @@
         let germanMaleVoice = null; // German male voice for final sentence
         let availableVoices = []; // All available voices
 
+        // Drag state
+        let draggedParticle = null;
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragStartY = 0;
+        let wasDragging = false; // Track if we just finished dragging
+
         // ========================================
         // INITIALIZATION
         // ========================================
         function init() {
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
+
+            // Add mouse event listeners for drag and click
+            canvas.addEventListener('mousedown', handleMouseDown);
+            canvas.addEventListener('mousemove', handleMouseMove);
+            canvas.addEventListener('mouseup', handleMouseUp);
             canvas.addEventListener('click', handleClick);
 
             // Load voices
@@ -150,6 +162,13 @@
         // ========================================
         // FRENCH LETTER DECOMPOSITION & MAPPING
         // ========================================
+        function isSpecialCharacter(char) {
+            // Check if character is punctuation or special character
+            // Include: spaces, hyphens, apostrophes, commas, periods, etc.
+            const specialChars = /[^a-zA-ZÀ-ÿ]/; // Everything except letters (including accented)
+            return specialChars.test(char);
+        }
+
         function decomposeSentence() {
             letterMapping = {};
             letterStates = [];
@@ -158,24 +177,26 @@
             for (let i = 0; i < SENTENCE.length; i++) {
                 const char = SENTENCE[i];
 
+                const isSpecial = isSpecialCharacter(char);
+
                 const letterState = {
                     char: char,
                     index: i,
                     filled: false,
                     particle: null,
                     isSpace: char === ' ',
-                    isPunctuation: char === '.' || char === ',' || char === ';' || char === '!' || char === '?'
+                    isPunctuation: isSpecial && char !== ' ' // Any special char that's not a space
                 };
 
                 letterStates.push(letterState);
 
-                // Skip spaces and punctuation from mapping (they're auto-complete)
-                if (letterState.isSpace || letterState.isPunctuation) {
+                // Skip spaces and all special characters from mapping (they're auto-complete)
+                if (isSpecial) {
                     letterState.filled = true;
                     continue;
                 }
 
-                // Add to letter mapping
+                // Only add alphabetic letters to the mapping
                 if (!letterMapping[char]) {
                     letterMapping[char] = [];
                 }
@@ -188,7 +209,13 @@
                 });
             }
 
-            // Log duplicate letters
+            // Log statistics
+            console.log('\n=== LETTER STATISTICS ===');
+            console.log('Total characters in sentence:', SENTENCE.length);
+            console.log('Alphabetic letters (floating):', Object.keys(letterMapping).length, 'unique');
+            console.log('Total letter instances:', Object.values(letterMapping).reduce((sum, arr) => sum + arr.length, 0));
+            console.log('Special characters (auto-filled):', letterStates.filter(s => s.isSpace || s.isPunctuation).length);
+
             console.log('\n=== DUPLICATE LETTERS ===');
             Object.entries(letterMapping).forEach(([letter, positions]) => {
                 if (positions.length > 1) {
@@ -196,6 +223,10 @@
                         positions.map(p => p.index));
                 }
             });
+
+            console.log('\n=== SPECIAL CHARACTERS (NOT FLOATING) ===');
+            const specialChars = letterStates.filter(s => s.isSpace || s.isPunctuation);
+            console.log('Characters excluded from floating:', specialChars.map(s => s.char).join(''));
         }
 
         // ========================================
@@ -254,6 +285,7 @@
                         rotationSpeed: (Math.random() - 0.5) * 0.02 * speedMultiplier, // Faster letters rotate more
                         isFloating: true,
                         isTransitioning: false,
+                        isDragging: false,
                         transitionFrame: 0,
                         targetX: 0,
                         targetY: 0,
@@ -264,7 +296,17 @@
                         startY: 0,
                         startSize: size,
                         startWeight: LETTER_CONFIG.floating.weight,
-                        startRotation: 0
+                        startRotation: 0,
+                        // Color properties
+                        color: null, // Will be assigned when dragged
+                        originalColor: null, // Store the original assigned color
+                        colorFadeStartTime: null, // When to start fading color
+                        fontFamilyTransition: 0, // 0 = Georgia, 1 = Helvetica
+                        // Interaction tracking
+                        wasDragged: false, // Track if letter was dragged
+                        wasClicked: false, // Track if letter was clicked and placed
+                        dropTime: null, // Time when letter was dropped (for drag fade)
+                        lastVoiceTime: null // Track when voice was last played (for cooldown)
                     };
 
                     floatingLetters.push(particle);
@@ -289,7 +331,9 @@
 
             // Update and draw floating letters
             floatingLetters.forEach(particle => {
-                if (particle.isFloating) {
+                if (particle.isDragging) {
+                    updateDraggingParticle(particle);
+                } else if (particle.isFloating) {
                     updateFloatingParticle(particle);
                 } else if (particle.isTransitioning) {
                     updateTransitioningParticle(particle);
@@ -326,6 +370,43 @@
                 // Add tiny random variation on bounce
                 particle.vy *= 0.98 + Math.random() * 0.04;
             }
+
+            // Handle time-based transitions for dragged letters
+            if (particle.wasDragged && particle.dropTime) {
+                const now = Date.now();
+                const elapsed = (now - particle.dropTime) / 1000; // seconds
+
+                const HOLD_DURATION = 10; // Hold color/font for 10 seconds
+                const FADE_DURATION = 3; // Fade over 3 seconds
+
+                if (elapsed > HOLD_DURATION) {
+                    const fadeProgress = Math.min((elapsed - HOLD_DURATION) / FADE_DURATION, 1.0);
+
+                    // Fade font back to Georgia
+                    particle.fontFamilyTransition = lerp(1.0, 0, fadeProgress);
+
+                    // Fade color back to white
+                    if (particle.originalColor && fadeProgress < 1.0) {
+                        const color = interpolateColorToWhite(particle.originalColor, fadeProgress);
+                        particle.color = color;
+                    } else if (fadeProgress >= 1.0) {
+                        particle.color = null; // Fully white (will use default)
+                        particle.wasDragged = false;
+                        particle.dropTime = null;
+                        particle.originalColor = null;
+                        particle.fontFamilyTransition = 0;
+                    }
+                }
+            }
+        }
+
+        function updateDraggingParticle(particle) {
+            // Transition to Helvetica while dragging
+            particle.fontFamilyTransition = Math.min(particle.fontFamilyTransition + 0.05, 1.0);
+
+            // Slight size increase while dragging
+            const dragSize = particle.startSize * 1.2;
+            particle.size = lerp(particle.size, dragSize, 0.2);
         }
 
         function updateTransitioningParticle(particle) {
@@ -339,13 +420,42 @@
                 particle.size = particle.targetSize;
                 particle.weight = particle.targetWeight;
                 particle.rotation = particle.targetRotation;
+                particle.fontFamilyTransition = 1.0; // Fully Helvetica
                 particle.isTransitioning = false;
+
+                // Start color fade timer for clicked letters
+                if (particle.wasClicked) {
+                    particle.colorFadeStartTime = Date.now();
+                }
             } else {
                 particle.x = lerp(particle.startX, particle.targetX, eased);
                 particle.y = lerp(particle.startY, particle.targetY, eased);
                 particle.size = lerp(particle.startSize, particle.targetSize, eased);
                 particle.weight = lerp(particle.startWeight, particle.targetWeight, eased);
                 particle.rotation = lerp(particle.startRotation, particle.targetRotation, eased);
+                particle.fontFamilyTransition = lerp(0, 1, eased); // Transition font
+            }
+
+            // Handle time-based color fade for clicked/placed letters
+            if (particle.wasClicked && particle.colorFadeStartTime) {
+                const now = Date.now();
+                const elapsed = (now - particle.colorFadeStartTime) / 1000; // seconds
+
+                const FADE_START = 0; // Start fading immediately
+                const FADE_DURATION = 15 + Math.random() * 5; // 15-20 seconds
+
+                if (elapsed > FADE_START) {
+                    const fadeProgress = Math.min((elapsed - FADE_START) / FADE_DURATION, 1.0);
+
+                    // Fade color to white, keep Helvetica
+                    if (particle.originalColor && fadeProgress < 1.0) {
+                        const color = interpolateColorToWhite(particle.originalColor, fadeProgress);
+                        particle.color = color;
+                    } else if (fadeProgress >= 1.0) {
+                        particle.color = 'rgba(255, 255, 255, 1.0)'; // Pure white
+                        // Keep Helvetica (fontFamilyTransition stays at 1.0)
+                    }
+                }
             }
         }
 
@@ -354,27 +464,39 @@
             ctx.translate(particle.x, particle.y);
             ctx.rotate(particle.rotation);
 
-            // Use serif for floating (organic), Helvetica for placed (geometric/mechanical)
-            const fontFamily = particle.isFloating ?
+            // Interpolate between Georgia and Helvetica based on fontFamilyTransition
+            // For canvas, we can't truly interpolate fonts, so we switch at 0.5 threshold
+            const fontFamily = particle.fontFamilyTransition < 0.5 ?
                 'Georgia, serif' :
                 "'Helvetica Neue', Helvetica, Arial, sans-serif";
             ctx.font = `${particle.weight} ${particle.size}px ${fontFamily}`;
 
-            // Vary opacity based on speed (faster = more opaque, slower = more ghostly)
-            if (particle.isFloating) {
+            // Determine color
+            let fillColor;
+
+            if (particle.color) {
+                // If color is assigned (dragged), use it
+                fillColor = particle.color;
+            } else if (particle.isFloating && !particle.isDragging) {
+                // Floating letters: white with opacity based on speed
                 const opacity = particle.speedMultiplier ?
                     Math.min(0.6 + particle.speedMultiplier * 0.15, 1.0) : 1.0;
-                ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+                fillColor = `rgba(255, 255, 255, ${opacity})`;
 
                 // Vary shadow based on speed
                 const shadowIntensity = particle.speedMultiplier ?
                     5 + particle.speedMultiplier * 3 : 10;
                 ctx.shadowBlur = shadowIntensity;
                 ctx.shadowColor = `rgba(255, 255, 255, ${opacity * 0.4})`;
+            } else if (particle.isFloating || particle.isDragging) {
+                // Dragging but no color yet
+                fillColor = '#ffffff';
             } else {
-                ctx.fillStyle = '#00ff88';
+                // Placed letters without drag (click interaction)
+                fillColor = '#00ff88';
             }
 
+            ctx.fillStyle = fillColor;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 
@@ -440,33 +562,161 @@
         }
 
         // ========================================
-        // CLICK INTERACTION
+        // MOUSE INTERACTION (DRAG & CLICK)
         // ========================================
-        function handleClick(event) {
+        function generateRandomColor() {
+            // Generate vibrant random colors
+            const hue = Math.random() * 360;
+            const saturation = 70 + Math.random() * 30; // 70-100%
+            const lightness = 45 + Math.random() * 15; // 45-60%
+            return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+        }
+
+        function findParticleAt(mouseX, mouseY) {
+            let nearestParticle = null;
+            let nearestDist = Infinity;
+
+            floatingLetters.forEach(particle => {
+                if (!particle.isFloating || particle.isDragging) return;
+
+                const dx = particle.x - mouseX;
+                const dy = particle.y - mouseY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < nearestDist && dist < 50) { // Within 50px
+                    nearestDist = dist;
+                    nearestParticle = particle;
+                }
+            });
+
+            return nearestParticle;
+        }
+
+        function handleMouseDown(event) {
             if (allLettersPlaced) return;
 
             const rect = canvas.getBoundingClientRect();
             const mouseX = event.clientX - rect.left;
             const mouseY = event.clientY - rect.top;
 
-            // Find nearest floating letter
-            let nearestParticle = null;
-            let nearestDist = Infinity;
+            dragStartX = mouseX;
+            dragStartY = mouseY;
+            wasDragging = false;
 
-            floatingLetters.forEach(particle => {
-                if (!particle.isFloating) return;
+            // Find particle to drag
+            const particle = findParticleAt(mouseX, mouseY);
 
-                const dx = particle.x - mouseX;
-                const dy = particle.y - mouseY;
-                const dist = Math.sqrt(dx * dx + dy * dy);
+            if (particle) {
+                draggedParticle = particle;
+                isDragging = false; // Will become true on mouse move
+            }
+        }
 
-                if (dist < nearestDist && dist < 100) { // Within 100px
-                    nearestDist = dist;
-                    nearestParticle = particle;
+        function handleMouseMove(event) {
+            if (!draggedParticle) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+
+            // Check if mouse moved enough to be considered a drag
+            const dx = mouseX - dragStartX;
+            const dy = mouseY - dragStartY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist > 5 && !isDragging) {
+                isDragging = true;
+                wasDragging = true;
+                draggedParticle.isDragging = true;
+                draggedParticle.isFloating = false;
+
+                // Assign random color when drag actually starts
+                if (!draggedParticle.color) {
+                    const randomColor = generateRandomColor();
+                    draggedParticle.color = randomColor;
+                    draggedParticle.originalColor = randomColor; // Store for fade
                 }
-            });
+
+                // Play voice when drag starts (with cooldown to avoid repetition)
+                const now = Date.now();
+                const VOICE_COOLDOWN = 2000; // 2 seconds cooldown
+                if (!draggedParticle.lastVoiceTime || (now - draggedParticle.lastVoiceTime) > VOICE_COOLDOWN) {
+                    speakLetter(draggedParticle.letter);
+                    draggedParticle.lastVoiceTime = now;
+                }
+            }
+
+            if (isDragging) {
+                draggedParticle.x = mouseX;
+                draggedParticle.y = mouseY;
+            }
+        }
+
+        function handleMouseUp(event) {
+            if (!draggedParticle) return;
+
+            if (isDragging) {
+                // DRAG behavior: Drop at current position, keep floating with new color
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = event.clientX - rect.left;
+                const mouseY = event.clientY - rect.top;
+
+                // Set new position
+                draggedParticle.x = mouseX;
+                draggedParticle.y = mouseY;
+
+                // Resume floating from this new position
+                draggedParticle.isDragging = false;
+                draggedParticle.isFloating = true;
+
+                // Keep Helvetica for now (will fade back after 10 seconds)
+                // fontFamilyTransition stays at 1.0
+
+                // Reset size back to original
+                draggedParticle.size = draggedParticle.startSize;
+
+                // Mark as dragged and set drop time for fade timer
+                draggedParticle.wasDragged = true;
+                draggedParticle.dropTime = Date.now();
+
+                // Color persists (already assigned)
+            } else {
+                // Short click (no drag) - do nothing here, handleClick will handle it
+            }
+
+            draggedParticle = null;
+            isDragging = false;
+        }
+
+        function handleClick(event) {
+            // CLICK behavior: Place letter in correct position with Helvetica transformation
+            if (allLettersPlaced) return;
+
+            // Don't trigger click if we just finished dragging
+            if (wasDragging) {
+                wasDragging = false;
+                return;
+            }
+
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+
+            const nearestParticle = findParticleAt(mouseX, mouseY);
 
             if (nearestParticle) {
+                // Assign random color immediately on click
+                if (!nearestParticle.color) {
+                    const randomColor = generateRandomColor();
+                    nearestParticle.color = randomColor;
+                    nearestParticle.originalColor = randomColor; // Store for fade
+                }
+
+                // Mark as clicked for color fade behavior
+                nearestParticle.wasClicked = true;
+
+                // Place letter in correct sentence position
+                // This will transform to Helvetica and lock in place
                 placeLetter(nearestParticle);
             }
         }
@@ -495,6 +745,7 @@
 
             // Start transition
             particle.isFloating = false;
+            particle.isDragging = false; // Stop dragging
             particle.isTransitioning = true;
             particle.transitionFrame = 0;
             particle.startX = particle.x;
@@ -507,6 +758,11 @@
             particle.targetSize = LETTER_CONFIG.placed.size;
             particle.targetWeight = LETTER_CONFIG.placed.weight;
             particle.targetRotation = 0;
+
+            // Ensure font transition completes if it was being dragged
+            if (particle.fontFamilyTransition > 0 && particle.fontFamilyTransition < 1) {
+                // Continue the font transition during placement
+            }
 
             // Pronounce the letter
             speakLetter(letter);
@@ -609,6 +865,25 @@
             return t < 0.5
                 ? 4 * t * t * t
                 : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        }
+
+        function interpolateColorToWhite(hslColor, progress) {
+            // Parse HSL color string like "hsl(235, 85%, 52%)"
+            const match = hslColor.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+            if (!match) return hslColor;
+
+            const h = parseInt(match[1]);
+            const s = parseInt(match[2]);
+            const l = parseInt(match[3]);
+
+            // Ease the progress for smoother transition
+            const eased = easeInOutCubic(progress);
+
+            // Interpolate to white: hsl(h, 0%, 100%)
+            const newS = lerp(s, 0, eased);
+            const newL = lerp(l, 100, eased);
+
+            return `hsl(${h}, ${newS}%, ${newL}%)`;
         }
 
         // ========================================
