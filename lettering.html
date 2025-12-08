@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>L'absurde - Lettering</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background: #000000;
+            color: #ffffff;
+            overflow-x: hidden;
+        }
+
+        .header {
+            padding: 20px 40px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 300;
+            letter-spacing: 0.05em;
+        }
+
+        .header-buttons {
+            display: flex;
+            gap: 16px;
+        }
+
+        .btn {
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 300;
+            letter-spacing: 0.03em;
+            background: transparent;
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.6);
+        }
+
+        .btn.primary {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.5);
+        }
+
+        .btn.primary:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        .main-container {
+            display: flex;
+            height: calc(100vh - 65px);
+        }
+
+        .sidebar {
+            width: 300px;
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .sidebar h2 {
+            font-size: 16px;
+            font-weight: 400;
+            margin-bottom: 20px;
+            opacity: 0.7;
+            letter-spacing: 0.05em;
+        }
+
+        .character-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .character-item {
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 18px;
+        }
+
+        .character-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .character-item.active {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+
+        .character-item.completed {
+            opacity: 0.6;
+        }
+
+        .character-item .status {
+            font-size: 12px;
+            opacity: 0.5;
+        }
+
+        .character-item.completed .status {
+            color: #4ade80;
+            opacity: 1;
+        }
+
+        .workspace {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            padding: 40px;
+            overflow-y: auto;
+        }
+
+        .canvas-container {
+            position: relative;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-bottom: 30px;
+        }
+
+        .guide-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 200px;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.1);
+            pointer-events: none;
+            font-family: Georgia, serif;
+            user-select: none;
+        }
+
+        #drawingCanvas {
+            display: block;
+            cursor: crosshair;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .tool-group {
+            display: flex;
+            gap: 8px;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .tool-btn {
+            padding: 10px 16px;
+            font-size: 13px;
+            background: transparent;
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        }
+
+        .tool-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .tool-btn.active {
+            background: rgba(255, 255, 255, 0.25);
+            border-color: rgba(255, 255, 255, 0.5);
+        }
+
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .slider-group label {
+            font-size: 11px;
+            opacity: 0.7;
+            letter-spacing: 0.05em;
+        }
+
+        .slider {
+            width: 120px;
+        }
+
+        .no-selection {
+            text-align: center;
+            opacity: 0.5;
+            font-size: 18px;
+            font-weight: 300;
+        }
+
+        .progress-info {
+            margin-bottom: 20px;
+            font-size: 14px;
+            opacity: 0.7;
+        }
+
+        @media (max-width: 900px) {
+            .sidebar {
+                width: 200px;
+            }
+
+            .guide-text {
+                font-size: 120px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>Lettering Mode</h1>
+        <div class="header-buttons">
+            <button class="btn" id="backBtn">← Back</button>
+            <button class="btn primary" id="toInteractionBtn">To Interaction →</button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <h2>Characters to Draw</h2>
+            <div class="progress-info">
+                <span id="progressText">0/0 completed</span>
+            </div>
+            <div class="character-list" id="characterList"></div>
+        </div>
+
+        <div class="workspace">
+            <div id="noSelection" class="no-selection">
+                Select a character from the list to start drawing
+            </div>
+
+            <div id="workspaceContent" style="display: none;">
+                <div class="toolbar">
+                    <div class="tool-group">
+                        <button class="tool-btn active" data-tool="solid">Solid</button>
+                        <button class="tool-btn" data-tool="pressure">Pressure</button>
+                        <button class="tool-btn" data-tool="dot">Dot</button>
+                        <button class="tool-btn" data-tool="eraser">Eraser</button>
+                    </div>
+
+                    <div class="tool-group slider-group">
+                        <label for="sizeSlider">SIZE</label>
+                        <input type="range" id="sizeSlider" class="slider" min="1" max="50" value="5">
+                    </div>
+
+                    <button class="btn" id="clearBtn">Clear</button>
+                    <button class="btn primary" id="saveBtn">Save & Next</button>
+                </div>
+
+                <div class="canvas-container">
+                    <div class="guide-text" id="guideText"></div>
+                    <canvas id="drawingCanvas" width="400" height="400"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ========================================
+        // CONFIGURATION
+        // ========================================
+        const SENTENCE = "Aujourd'hui, maman est morte. Ou peut-être hier.";
+        const STORAGE_KEY = 'absurde_letterings';
+
+        // ========================================
+        // STATE
+        // ========================================
+        let uniqueCharacters = [];
+        let currentCharacter = null;
+        let letterings = {}; // { char: imageDataURL }
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+        let currentTool = 'solid';
+        let brushSize = 5;
+        let pressure = 0.5;
+
+        // Canvas
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // ========================================
+        // INITIALIZATION
+        // ========================================
+        function init() {
+            // Extract unique alphabetic characters
+            extractUniqueCharacters();
+
+            // Load saved letterings from localStorage
+            loadLetterings();
+
+            // Render character list
+            renderCharacterList();
+
+            // Setup event listeners
+            setupEventListeners();
+
+            // Update progress
+            updateProgress();
+        }
+
+        function extractUniqueCharacters() {
+            const chars = new Set();
+            for (let char of SENTENCE) {
+                // Only include alphabetic characters (including accented)
+                if (/[a-zA-ZÀ-ÿ]/.test(char)) {
+                    chars.add(char);
+                }
+            }
+            uniqueCharacters = Array.from(chars).sort();
+        }
+
+        function loadLetterings() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) {
+                    letterings = JSON.parse(saved);
+                }
+            } catch (e) {
+                console.error('Failed to load letterings:', e);
+                letterings = {};
+            }
+        }
+
+        function saveLetterings() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(letterings));
+            } catch (e) {
+                console.error('Failed to save letterings:', e);
+            }
+        }
+
+        // ========================================
+        // UI RENDERING
+        // ========================================
+        function renderCharacterList() {
+            const listEl = document.getElementById('characterList');
+            listEl.innerHTML = '';
+
+            uniqueCharacters.forEach(char => {
+                const item = document.createElement('div');
+                item.className = 'character-item';
+                if (letterings[char]) {
+                    item.classList.add('completed');
+                }
+                if (currentCharacter === char) {
+                    item.classList.add('active');
+                }
+
+                const charSpan = document.createElement('span');
+                charSpan.textContent = char;
+
+                const status = document.createElement('span');
+                status.className = 'status';
+                status.textContent = letterings[char] ? '✓' : '';
+
+                item.appendChild(charSpan);
+                item.appendChild(status);
+
+                item.addEventListener('click', () => selectCharacter(char));
+
+                listEl.appendChild(item);
+            });
+        }
+
+        function selectCharacter(char) {
+            currentCharacter = char;
+            renderCharacterList();
+            showWorkspace();
+            loadCharacterDrawing();
+        }
+
+        function showWorkspace() {
+            document.getElementById('noSelection').style.display = 'none';
+            document.getElementById('workspaceContent').style.display = 'block';
+            document.getElementById('guideText').textContent = currentCharacter;
+        }
+
+        function loadCharacterDrawing() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Load saved drawing if exists
+            if (letterings[currentCharacter]) {
+                const img = new Image();
+                img.onload = () => {
+                    ctx.drawImage(img, 0, 0);
+                };
+                img.src = letterings[currentCharacter];
+            }
+        }
+
+        function updateProgress() {
+            const completed = Object.keys(letterings).length;
+            const total = uniqueCharacters.length;
+            document.getElementById('progressText').textContent = `${completed}/${total} completed`;
+        }
+
+        // ========================================
+        // DRAWING
+        // ========================================
+        function setupEventListeners() {
+            // Canvas drawing
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing);
+
+            // Touch support
+            canvas.addEventListener('touchstart', handleTouchStart);
+            canvas.addEventListener('touchmove', handleTouchMove);
+            canvas.addEventListener('touchend', stopDrawing);
+
+            // Tool buttons
+            document.querySelectorAll('[data-tool]').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('[data-tool]').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    currentTool = e.target.dataset.tool;
+                });
+            });
+
+            // Size slider
+            document.getElementById('sizeSlider').addEventListener('input', (e) => {
+                brushSize = parseInt(e.target.value);
+            });
+
+            // Clear button
+            document.getElementById('clearBtn').addEventListener('click', clearCanvas);
+
+            // Save button
+            document.getElementById('saveBtn').addEventListener('click', saveAndNext);
+
+            // Navigation buttons
+            document.getElementById('backBtn').addEventListener('click', () => {
+                window.location.href = 'entry.html';
+            });
+
+            document.getElementById('toInteractionBtn').addEventListener('click', () => {
+                window.location.href = 'interaction.html';
+            });
+        }
+
+        function startDrawing(e) {
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            lastX = e.clientX - rect.left;
+            lastY = e.clientY - rect.top;
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            switch (currentTool) {
+                case 'solid':
+                    drawSolid(lastX, lastY, x, y);
+                    break;
+                case 'pressure':
+                    drawPressure(lastX, lastY, x, y);
+                    break;
+                case 'dot':
+                    drawDot(x, y);
+                    break;
+                case 'eraser':
+                    drawEraser(lastX, lastY, x, y);
+                    break;
+            }
+
+            lastX = x;
+            lastY = y;
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+        }
+
+        function handleTouchStart(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            isDrawing = true;
+            lastX = touch.clientX - rect.left;
+            lastY = touch.clientY - rect.top;
+        }
+
+        function handleTouchMove(e) {
+            e.preventDefault();
+            if (!isDrawing) return;
+
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+
+            draw({ clientX: touch.clientX, clientY: touch.clientY });
+        }
+
+        function drawSolid(x1, y1, x2, y2) {
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = brushSize;
+            ctx.globalCompositeOperation = 'source-over';
+
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+
+        function drawPressure(x1, y1, x2, y2) {
+            // Simulate pressure based on speed
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const speed = distance;
+
+            // Slower movement = more pressure (thicker line)
+            const pressureFactor = Math.max(0.3, 1 - (speed / 30));
+            const size = brushSize * pressureFactor;
+
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = size;
+            ctx.globalAlpha = 0.7 + (pressureFactor * 0.3);
+            ctx.globalCompositeOperation = 'source-over';
+
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+
+            ctx.globalAlpha = 1.0;
+        }
+
+        function drawDot(x, y) {
+            ctx.fillStyle = '#ffffff';
+            ctx.globalCompositeOperation = 'source-over';
+
+            // Draw multiple small dots for bitmap effect
+            const dotSize = brushSize / 3;
+            for (let i = 0; i < 3; i++) {
+                const offsetX = (Math.random() - 0.5) * brushSize;
+                const offsetY = (Math.random() - 0.5) * brushSize;
+                ctx.fillRect(x + offsetX, y + offsetY, dotSize, dotSize);
+            }
+        }
+
+        function drawEraser(x1, y1, x2, y2) {
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.lineWidth = brushSize * 2;
+
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+
+            ctx.globalCompositeOperation = 'source-over';
+        }
+
+        function clearCanvas() {
+            if (confirm('Clear this drawing?')) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        // ========================================
+        // SAVE & NAVIGATION
+        // ========================================
+        function saveAndNext() {
+            // Save current drawing
+            const imageData = canvas.toDataURL('image/png');
+            letterings[currentCharacter] = imageData;
+            saveLetterings();
+
+            // Update UI
+            renderCharacterList();
+            updateProgress();
+
+            // Move to next unfinished character
+            const nextChar = findNextUnfinishedCharacter();
+            if (nextChar) {
+                selectCharacter(nextChar);
+            } else {
+                alert('All characters completed! You can now proceed to Interaction mode.');
+            }
+        }
+
+        function findNextUnfinishedCharacter() {
+            const currentIndex = uniqueCharacters.indexOf(currentCharacter);
+            // Search forward from current position
+            for (let i = currentIndex + 1; i < uniqueCharacters.length; i++) {
+                if (!letterings[uniqueCharacters[i]]) {
+                    return uniqueCharacters[i];
+                }
+            }
+            // Search from beginning
+            for (let i = 0; i < currentIndex; i++) {
+                if (!letterings[uniqueCharacters[i]]) {
+                    return uniqueCharacters[i];
+                }
+            }
+            return null;
+        }
+
+        // ========================================
+        // START
+        // ========================================
+        init();
+    </script>
+</body>
+
+</html>
