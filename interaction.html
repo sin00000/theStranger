@@ -788,6 +788,16 @@
                         particle.dropTime = null;
                         particle.originalColor = null;
                         particle.fontFamilyTransition = 0; // Back to original
+
+                        // For custom lettering: also disable Helvetica fallback after fade completes
+                        if (particle.useHelveticaFallback) {
+                            particle.useHelveticaFallback = false;
+                            // Clear timer if it exists
+                            if (particle.revertTimer) {
+                                clearTimeout(particle.revertTimer);
+                                particle.revertTimer = null;
+                            }
+                        }
                     }
                 }
             }
@@ -1203,16 +1213,9 @@
                 draggedParticle.wasDragged = true;
                 draggedParticle.dropTime = Date.now();
 
-                // If custom lettering exists, start 10-second timer to revert
-                if (hasCustomLettering(draggedParticle.letter) && draggedParticle.useHelveticaFallback) {
-                    draggedParticle.revertTimer = setTimeout(() => {
-                        draggedParticle.useHelveticaFallback = false;
-                        draggedParticle.revertTimer = null;
-                    }, 10000); // 10 seconds
-                }
-
-                // Color persists (already assigned during drag start)
-                // Font transition will fade back to original after 10 seconds
+                // Color and font will gradually fade back after 10 seconds
+                // The gradual fade is handled in updateFloatingParticle()
+                // For custom lettering: useHelveticaFallback will be disabled after fade completes
             } else {
                 // Short click (no drag) - do nothing here, handleClick will handle it
             }
