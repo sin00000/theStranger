@@ -31,6 +31,14 @@
             pointer-events: none;
         }
 
+        @media (max-width: 600px) {
+            .info {
+                font-size: 10px;
+                top: 10px;
+                left: 10px;
+            }
+        }
+
         .completion-overlay {
             position: absolute;
             top: 0;
@@ -61,6 +69,25 @@
         #completedSentence {
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
             font-weight: 300;
+            font-size: 36px;
+            padding: 0 20px;
+            max-width: 90vw;
+            word-wrap: break-word;
+        }
+
+        @media (max-width: 600px) {
+            #completedSentence {
+                font-size: 20px;
+            }
+            .completion-message {
+                font-size: 12px;
+            }
+        }
+
+        @media (min-width: 601px) and (max-width: 1024px) {
+            #completedSentence {
+                font-size: 28px;
+            }
         }
     </style>
 </head>
@@ -71,7 +98,7 @@
     </div>
     <div class="completion-overlay" id="completionOverlay">
         <div class="completion-message">Sentence completed</div>
-        <div id="completedSentence" style="cursor: pointer; font-size: 36px;"></div>
+        <div id="completedSentence" style="cursor: pointer;"></div>
     </div>
 
     <script>
@@ -81,7 +108,7 @@
         const SENTENCE = "Aujourd'hui, maman est morte. Ou peut-être hier.";
         const FLOATING_AREA_RATIO = 0.8; // 80% for floating, 20% for sentence area
 
-        const LETTER_CONFIG = {
+        const LETTER_CONFIG_BASE = {
             floating: {
                 minSize: 60,
                 maxSize: 80,
@@ -95,6 +122,30 @@
             },
             transition: {
                 duration: 30 // frames
+            }
+        };
+
+        // Responsive letter config with getters
+        const LETTER_CONFIG = {
+            get floating() {
+                const scale = getResponsiveScale();
+                return {
+                    minSize: LETTER_CONFIG_BASE.floating.minSize * scale.floating,
+                    maxSize: LETTER_CONFIG_BASE.floating.maxSize * scale.floating,
+                    weight: LETTER_CONFIG_BASE.floating.weight,
+                    style: LETTER_CONFIG_BASE.floating.style
+                };
+            },
+            get placed() {
+                const scale = getResponsiveScale();
+                return {
+                    size: LETTER_CONFIG_BASE.placed.size * scale.placed,
+                    weight: LETTER_CONFIG_BASE.placed.weight,
+                    style: LETTER_CONFIG_BASE.placed.style
+                };
+            },
+            get transition() {
+                return LETTER_CONFIG_BASE.transition;
             }
         };
 
@@ -120,6 +171,52 @@
         let dragStartX = 0;
         let dragStartY = 0;
         let wasDragging = false; // Track if we just finished dragging
+
+        // ========================================
+        // RESPONSIVE UTILITIES
+        // ========================================
+        function getResponsiveScale() {
+            const screenWidth = window.innerWidth;
+
+            // Mobile: < 600px
+            if (screenWidth < 600) {
+                return {
+                    floating: 0.4,  // 40% of base size
+                    placed: 0.5,    // 50% of base size
+                    letterWidth: 0.5,
+                    letterSpacing: 0.5
+                };
+            }
+            // Tablet: 600-1024px
+            else if (screenWidth < 1024) {
+                return {
+                    floating: 0.65,
+                    placed: 0.75,
+                    letterWidth: 0.75,
+                    letterSpacing: 0.75
+                };
+            }
+            // Desktop: >= 1024px
+            else {
+                return {
+                    floating: 1.0,
+                    placed: 1.0,
+                    letterWidth: 1.0,
+                    letterSpacing: 1.0
+                };
+            }
+        }
+
+        function getResponsiveLetterDimensions() {
+            const scale = getResponsiveScale();
+            const baseLetterWidth = 18;
+            const baseLetterSpacing = 2;
+
+            return {
+                letterWidth: baseLetterWidth * scale.letterWidth,
+                letterSpacing: baseLetterSpacing * scale.letterSpacing
+            };
+        }
 
         // ========================================
         // INITIALIZATION
@@ -153,10 +250,76 @@
         }
 
         function resizeCanvas() {
+            const oldWidth = width;
+            const oldHeight = height;
+
             width = canvas.width = window.innerWidth;
             height = canvas.height = window.innerHeight;
             floatingAreaHeight = height * FLOATING_AREA_RATIO;
             sentenceAreaTop = floatingAreaHeight;
+
+            // If this is a resize (not initial load), update positions
+            if (oldWidth && oldHeight) {
+                updatePositionsAfterResize(oldWidth, oldHeight);
+            }
+        }
+
+        function updatePositionsAfterResize(oldWidth, oldHeight) {
+            // 1. Constrain floating letters to new bounds
+            floatingLetters.forEach(particle => {
+                if (particle.isFloating) {
+                    // Scale position proportionally
+                    particle.x = (particle.x / oldWidth) * width;
+                    particle.y = (particle.y / (oldHeight * FLOATING_AREA_RATIO)) * floatingAreaHeight;
+
+                    // Ensure within bounds
+                    particle.x = Math.max(0, Math.min(width, particle.x));
+                    particle.y = Math.max(0, Math.min(floatingAreaHeight, particle.y));
+                }
+            });
+
+            // 2. Recalculate positions for placed/transitioning letters
+            floatingLetters.forEach(particle => {
+                if (!particle.isFloating || particle.isTransitioning) {
+                    // Find which letter state this particle is associated with
+                    const targetIndex = findTargetIndexForParticle(particle);
+
+                    if (targetIndex !== -1) {
+                        const { letterWidth, letterSpacing } = getResponsiveLetterDimensions();
+                        const totalWidth = letterStates.length * (letterWidth + letterSpacing);
+                        const startX = (width - totalWidth) / 2;
+                        const targetX = startX + (targetIndex * (letterWidth + letterSpacing)) + letterWidth / 2;
+                        const baseY = sentenceAreaTop + (height - sentenceAreaTop) / 2;
+
+                        // Update target position
+                        particle.targetX = targetX;
+                        particle.targetY = baseY;
+
+                        // If already placed (not transitioning), update current position immediately
+                        if (!particle.isTransitioning) {
+                            particle.x = targetX;
+                            particle.y = baseY;
+                        }
+
+                        // Update target size based on new responsive scale
+                        const placedConfig = LETTER_CONFIG.placed;
+                        particle.targetSize = placedConfig.size;
+                        if (!particle.isTransitioning) {
+                            particle.size = placedConfig.size;
+                        }
+                    }
+                }
+            });
+        }
+
+        function findTargetIndexForParticle(particle) {
+            // Find which position in letterStates this particle occupies
+            for (let i = 0; i < letterStates.length; i++) {
+                if (letterStates[i].particle === particle) {
+                    return i;
+                }
+            }
+            return -1;
         }
 
         // ========================================
@@ -306,7 +469,14 @@
                         wasDragged: false, // Track if letter was dragged
                         wasClicked: false, // Track if letter was clicked and placed
                         dropTime: null, // Time when letter was dropped (for drag fade)
-                        lastVoiceTime: null // Track when voice was last played (for cooldown)
+                        lastVoiceTime: null, // Track when voice was last played (for cooldown)
+                        // Drag physics
+                        dragTargetX: 0, // Mouse position for spring physics
+                        dragTargetY: 0,
+                        dragVx: 0, // Velocity tracking during drag
+                        dragVy: 0,
+                        lastDragX: 0, // Previous mouse position for velocity calculation
+                        lastDragY: 0
                     };
 
                     floatingLetters.push(particle);
@@ -314,6 +484,120 @@
             });
 
             console.log(`Created ${floatingLetters.length} floating letter particles`);
+        }
+
+        // ========================================
+        // COLLISION DETECTION & PHYSICS
+        // ========================================
+        function handleCollisions() {
+            // Only check collisions between floating particles
+            const floatingParticles = floatingLetters.filter(p => p.isFloating && !p.isDragging);
+
+            // Optimization: Use spatial grid to reduce collision checks
+            // Grid cell size based on largest letter size
+            const cellSize = LETTER_CONFIG_BASE.floating.maxSize * 2;
+            const grid = {};
+
+            // Assign particles to grid cells
+            floatingParticles.forEach(p => {
+                const cellX = Math.floor(p.x / cellSize);
+                const cellY = Math.floor(p.y / cellSize);
+                const key = `${cellX},${cellY}`;
+
+                if (!grid[key]) grid[key] = [];
+                grid[key].push(p);
+            });
+
+            // Check collisions only within same and neighboring cells
+            Object.values(grid).forEach(cell => {
+                // Check all pairs within this cell
+                for (let i = 0; i < cell.length; i++) {
+                    for (let j = i + 1; j < cell.length; j++) {
+                        checkAndResolveCollision(cell[i], cell[j]);
+                    }
+                }
+            });
+        }
+
+        function checkAndResolveCollision(p1, p2) {
+            // Calculate distance between centers
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            // Calculate collision radius (approximate based on font size)
+            // Letters are roughly circular, radius is about half the font size
+            const radius1 = p1.size / 2.5; // Slightly smaller hitbox for more natural feel
+            const radius2 = p2.size / 2.5;
+            const minDistance = radius1 + radius2;
+
+            // Check for collision
+            if (distance < minDistance && distance > 0.1) {
+                // Collision detected! Apply elastic collision physics
+
+                // Normalize the collision vector
+                const nx = dx / distance;
+                const ny = dy / distance;
+
+                // Relative velocity
+                const dvx = p2.vx - p1.vx;
+                const dvy = p2.vy - p1.vy;
+
+                // Relative velocity in collision normal direction
+                const dvn = dvx * nx + dvy * ny;
+
+                // Don't process if particles are moving apart
+                if (dvn >= 0) return;
+
+                // Coefficient of restitution (bounciness): 0.8 for slightly damped collision
+                const restitution = 0.85;
+
+                // Calculate impulse magnitude for equal mass particles
+                // impulse = -(1 + restitution) * relativeVelocityAlongNormal / 2
+                const impulseMagnitude = -(1 + restitution) * dvn / 2;
+
+                // Apply impulse to both particles
+                const impulseX = impulseMagnitude * nx;
+                const impulseY = impulseMagnitude * ny;
+
+                p1.vx -= impulseX;
+                p1.vy -= impulseY;
+                p2.vx += impulseX;
+                p2.vy += impulseY;
+
+                // Separate overlapping particles to prevent sticking
+                const overlap = minDistance - distance;
+                const separationRatio = 0.6; // Move particles 60% of overlap distance
+                const separationX = (overlap * separationRatio / 2) * nx;
+                const separationY = (overlap * separationRatio / 2) * ny;
+
+                p1.x -= separationX;
+                p1.y -= separationY;
+                p2.x += separationX;
+                p2.y += separationY;
+
+                // Add rotation based on tangential impact
+                // Tangent vector perpendicular to normal
+                const tx = -ny;
+                const ty = nx;
+
+                // Tangential velocity component
+                const dvt = dvx * tx + dvy * ty;
+
+                // Apply rotational impulse proportional to tangential velocity
+                const rotationImpulse = dvt * 0.005;
+                p1.rotationSpeed += rotationImpulse;
+                p2.rotationSpeed -= rotationImpulse;
+
+                // Apply slight damping to rotation
+                p1.rotationSpeed *= 0.98;
+                p2.rotationSpeed *= 0.98;
+
+                // Clamp rotation speed
+                const maxRotationSpeed = 0.08;
+                p1.rotationSpeed = Math.max(-maxRotationSpeed, Math.min(maxRotationSpeed, p1.rotationSpeed));
+                p2.rotationSpeed = Math.max(-maxRotationSpeed, Math.min(maxRotationSpeed, p2.rotationSpeed));
+            }
         }
 
         // ========================================
@@ -341,6 +625,9 @@
                 drawLetter(particle);
             });
 
+            // Handle collisions between floating letters
+            handleCollisions();
+
             // Draw sentence area
             drawSentenceArea();
 
@@ -355,21 +642,29 @@
             // Update rotation continuously based on speed
             particle.rotation += particle.rotationSpeed;
 
-            // Bounce off walls with slight speed variation for chaos
+            // Bounce off walls with damping and variation
+            const wallDamping = 0.92; // Slight energy loss on wall bounce
+
             if (particle.x < 0 || particle.x > width) {
-                particle.vx *= -1;
+                particle.vx *= -wallDamping;
                 particle.x = Math.max(0, Math.min(width, particle.x));
 
                 // Add tiny random variation on bounce (chaos effect)
-                particle.vx *= 0.98 + Math.random() * 0.04; // 98% to 102% of original
+                const variation = 0.98 + Math.random() * 0.04; // 98% to 102%
+                particle.vx *= variation;
             }
             if (particle.y < 0 || particle.y > floatingAreaHeight) {
-                particle.vy *= -1;
+                particle.vy *= -wallDamping;
                 particle.y = Math.max(0, Math.min(floatingAreaHeight, particle.y));
 
                 // Add tiny random variation on bounce
-                particle.vy *= 0.98 + Math.random() * 0.04;
+                const variation = 0.98 + Math.random() * 0.04;
+                particle.vy *= variation;
             }
+
+            // Apply very slight air resistance for smoother motion
+            particle.vx *= 0.998;
+            particle.vy *= 0.998;
 
             // Handle time-based transitions for dragged letters
             if (particle.wasDragged && particle.dropTime) {
@@ -407,6 +702,26 @@
             // Slight size increase while dragging
             const dragSize = particle.startSize * 1.2;
             particle.size = lerp(particle.size, dragSize, 0.2);
+
+            // Spring physics: letter follows mouse with inertia
+            const springStiffness = 0.25; // How quickly it follows (0-1, lower = more lag)
+            const damping = 0.85; // Velocity damping (0-1, lower = more friction)
+
+            // Calculate spring force toward target (mouse position)
+            const dx = particle.dragTargetX - particle.x;
+            const dy = particle.dragTargetY - particle.y;
+
+            // Apply spring force to velocity
+            particle.dragVx += dx * springStiffness;
+            particle.dragVy += dy * springStiffness;
+
+            // Apply damping to prevent oscillation
+            particle.dragVx *= damping;
+            particle.dragVy *= damping;
+
+            // Update position based on velocity
+            particle.x += particle.dragVx;
+            particle.y += particle.dragVy;
         }
 
         function updateTransitioningParticle(particle) {
@@ -509,8 +824,7 @@
         // ========================================
         function drawSentenceArea() {
             const baseY = sentenceAreaTop + (height - sentenceAreaTop) / 2;
-            const letterWidth = 18;
-            const letterSpacing = 2;
+            const { letterWidth, letterSpacing } = getResponsiveLetterDimensions();
 
             // Calculate total width
             const totalWidth = letterStates.length * (letterWidth + letterSpacing);
@@ -528,7 +842,8 @@
 
                 // Draw placed letters or punctuation/spaces
                 if (letterState.filled && (letterState.isSpace || letterState.isPunctuation)) {
-                    ctx.font = "300 24px 'Helvetica Neue', Helvetica, Arial, sans-serif";
+                    const placedConfig = LETTER_CONFIG.placed;
+                    ctx.font = `${placedConfig.weight} ${placedConfig.size}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
                     ctx.fillStyle = '#888';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
@@ -630,6 +945,14 @@
                 draggedParticle.isDragging = true;
                 draggedParticle.isFloating = false;
 
+                // Initialize drag physics
+                draggedParticle.dragTargetX = mouseX;
+                draggedParticle.dragTargetY = mouseY;
+                draggedParticle.lastDragX = mouseX;
+                draggedParticle.lastDragY = mouseY;
+                draggedParticle.dragVx = 0;
+                draggedParticle.dragVy = 0;
+
                 // Assign random color when drag actually starts
                 if (!draggedParticle.color) {
                     const randomColor = generateRandomColor();
@@ -647,8 +970,9 @@
             }
 
             if (isDragging) {
-                draggedParticle.x = mouseX;
-                draggedParticle.y = mouseY;
+                // Update drag target for spring physics
+                draggedParticle.dragTargetX = mouseX;
+                draggedParticle.dragTargetY = mouseY;
             }
         }
 
@@ -657,17 +981,24 @@
 
             if (isDragging) {
                 // DRAG behavior: Drop at current position, keep floating with new color
-                const rect = canvas.getBoundingClientRect();
-                const mouseX = event.clientX - rect.left;
-                const mouseY = event.clientY - rect.top;
 
-                // Set new position
-                draggedParticle.x = mouseX;
-                draggedParticle.y = mouseY;
-
-                // Resume floating from this new position
+                // Resume floating from current position
                 draggedParticle.isDragging = false;
                 draggedParticle.isFloating = true;
+
+                // Inherit velocity from drag motion (with slight boost for natural feel)
+                const velocityMultiplier = 1.2;
+                draggedParticle.vx = draggedParticle.dragVx * velocityMultiplier;
+                draggedParticle.vy = draggedParticle.dragVy * velocityMultiplier;
+
+                // Clamp inherited velocity to prevent too fast movement
+                const maxInheritedSpeed = 15;
+                const currentSpeed = Math.sqrt(draggedParticle.vx ** 2 + draggedParticle.vy ** 2);
+                if (currentSpeed > maxInheritedSpeed) {
+                    const scale = maxInheritedSpeed / currentSpeed;
+                    draggedParticle.vx *= scale;
+                    draggedParticle.vy *= scale;
+                }
 
                 // Keep Helvetica for now (will fade back after 10 seconds)
                 // fontFamilyTransition stays at 1.0
@@ -734,9 +1065,8 @@
             target.stateRef.filled = true;
             target.stateRef.particle = particle;
 
-            // Calculate target position
-            const letterWidth = 18;
-            const letterSpacing = 2;
+            // Calculate target position using responsive dimensions
+            const { letterWidth, letterSpacing } = getResponsiveLetterDimensions();
             const totalWidth = letterStates.length * (letterWidth + letterSpacing);
             const startX = (width - totalWidth) / 2;
 
