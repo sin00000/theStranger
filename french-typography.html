@@ -14,29 +14,12 @@
         body {
             font-family: 'Georgia', 'Times New Roman', serif;
             overflow: hidden;
-            background: #1a1a1a;
+            background: #000000;
         }
 
         #canvas {
             display: block;
-            cursor: pointer;
-        }
-
-        .info {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            color: #888;
-            font-size: 14px;
-            pointer-events: none;
-        }
-
-        @media (max-width: 600px) {
-            .info {
-                font-size: 10px;
-                top: 10px;
-                left: 10px;
-            }
+            cursor: default;
         }
 
         .completion-overlay {
@@ -45,60 +28,67 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(0, 0, 0, 0.95);
             display: none;
             justify-content: center;
             align-items: center;
             flex-direction: column;
-            color: white;
-            font-size: 24px;
-            text-align: center;
             z-index: 10;
+            backdrop-filter: blur(10px);
         }
 
         .completion-overlay.show {
             display: flex;
+            animation: fadeIn 1.5s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
-        .completion-message {
-            margin-bottom: 20px;
-            font-size: 16px;
-            color: #888;
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
         }
 
         #completedSentence {
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-weight: 300;
-            font-size: 36px;
-            padding: 0 20px;
-            max-width: 90vw;
-            word-wrap: break-word;
+            font-weight: 200;
+            font-size: 42px;
+            letter-spacing: 0.02em;
+            padding: 0 60px;
+            max-width: 85vw;
+            color: #ffffff;
+            cursor: pointer;
+            text-align: center;
+            line-height: 1.6;
+            transition: opacity 0.3s ease;
+        }
+
+        #completedSentence:hover {
+            opacity: 0.7;
         }
 
         @media (max-width: 600px) {
             #completedSentence {
-                font-size: 20px;
-            }
-            .completion-message {
-                font-size: 12px;
+                font-size: 22px;
+                padding: 0 30px;
+                letter-spacing: 0.01em;
             }
         }
 
         @media (min-width: 601px) and (max-width: 1024px) {
             #completedSentence {
-                font-size: 28px;
+                font-size: 32px;
+                padding: 0 40px;
             }
         }
     </style>
 </head>
 <body>
     <canvas id="canvas"></canvas>
-    <div class="info">
-        DRAG to reposition • CLICK to place in sentence
-    </div>
     <div class="completion-overlay" id="completionOverlay">
-        <div class="completion-message">Sentence completed</div>
-        <div id="completedSentence" style="cursor: pointer;"></div>
+        <div id="completedSentence"></div>
     </div>
 
     <script>
@@ -106,7 +96,8 @@
         // CONFIGURATION
         // ========================================
         const SENTENCE = "Aujourd'hui, maman est morte. Ou peut-être hier.";
-        const FLOATING_AREA_RATIO = 0.8; // 80% for floating, 20% for sentence area
+        const FLOATING_AREA_RATIO = 0.75; // 75% for floating, 25% for sentence area
+        const SENTENCE_VERTICAL_POSITION = 0.82; // Position sentence at 82% down the viewport
 
         const LETTER_CONFIG_BASE = {
             floating: {
@@ -164,6 +155,10 @@
         let allLettersPlaced = false;
         let germanMaleVoice = null; // German male voice for final sentence
         let availableVoices = []; // All available voices
+
+        // Placement tracking for progressive color fade
+        let totalLettersPlaced = 0;
+        let totalLettersNeeded = 0;
 
         // Drag state
         let draggedParticle = null;
@@ -372,11 +367,14 @@
                 });
             }
 
+            // Calculate total letters needed (non-space, non-punctuation)
+            totalLettersNeeded = Object.values(letterMapping).reduce((sum, arr) => sum + arr.length, 0);
+
             // Log statistics
             console.log('\n=== LETTER STATISTICS ===');
             console.log('Total characters in sentence:', SENTENCE.length);
             console.log('Alphabetic letters (floating):', Object.keys(letterMapping).length, 'unique');
-            console.log('Total letter instances:', Object.values(letterMapping).reduce((sum, arr) => sum + arr.length, 0));
+            console.log('Total letter instances:', totalLettersNeeded);
             console.log('Special characters (auto-filled):', letterStates.filter(s => s.isSpace || s.isPunctuation).length);
 
             console.log('\n=== DUPLICATE LETTERS ===');
@@ -463,8 +461,9 @@
                         // Color properties
                         color: null, // Will be assigned when dragged
                         originalColor: null, // Store the original assigned color
-                        colorFadeStartTime: null, // When to start fading color
+                        colorFadeStartTime: null, // Deprecated - now using placementOrder
                         fontFamilyTransition: 0, // 0 = Georgia, 1 = Helvetica
+                        placementOrder: null, // Order in which letter was placed (for progressive fade)
                         // Interaction tracking
                         wasDragged: false, // Track if letter was dragged
                         wasClicked: false, // Track if letter was clicked and placed
@@ -484,6 +483,34 @@
             });
 
             console.log(`Created ${floatingLetters.length} floating letter particles`);
+        }
+
+        // ========================================
+        // PROGRESSIVE COLOR FADE SYSTEM
+        // ========================================
+        function updateAllPlacedLetterColors() {
+            // Update colors for all placed letters based on their placement order
+            // Earlier placed letters should be whiter, recent ones more colorful
+
+            if (totalLettersPlaced === 0) return;
+
+            floatingLetters.forEach(particle => {
+                // Only update placed/transitioning letters that were clicked (not dragged)
+                if (particle.wasClicked && particle.placementOrder !== null && particle.originalColor) {
+                    // Calculate fade progress based on placement order
+                    // Earlier placed letters (lower placementOrder) = more faded (whiter)
+                    // Recently placed letters (higher placementOrder) = more colorful
+
+                    // Fade progress: 0 = most colorful (recent), 1 = white (earliest)
+                    const fadeProgress = particle.placementOrder / totalLettersPlaced;
+
+                    // Apply easing for smooth gradient
+                    const easedProgress = easeInOutCubic(fadeProgress);
+
+                    // Interpolate color toward white
+                    particle.color = interpolateColorToWhite(particle.originalColor, easedProgress);
+                }
+            });
         }
 
         // ========================================
@@ -549,8 +576,8 @@
                 // Don't process if particles are moving apart
                 if (dvn >= 0) return;
 
-                // Coefficient of restitution (bounciness): 0.8 for slightly damped collision
-                const restitution = 0.85;
+                // Softer coefficient of restitution for gentler, more natural bounces
+                const restitution = 0.65;
 
                 // Calculate impulse magnitude for equal mass particles
                 // impulse = -(1 + restitution) * relativeVelocityAlongNormal / 2
@@ -567,7 +594,7 @@
 
                 // Separate overlapping particles to prevent sticking
                 const overlap = minDistance - distance;
-                const separationRatio = 0.6; // Move particles 60% of overlap distance
+                const separationRatio = 0.5; // Gentler separation for smoother deflection
                 const separationX = (overlap * separationRatio / 2) * nx;
                 const separationY = (overlap * separationRatio / 2) * ny;
 
@@ -576,7 +603,7 @@
                 p2.x += separationX;
                 p2.y += separationY;
 
-                // Add rotation based on tangential impact
+                // Add rotation based on tangential impact for organic feel
                 // Tangent vector perpendicular to normal
                 const tx = -ny;
                 const ty = nx;
@@ -584,8 +611,8 @@
                 // Tangential velocity component
                 const dvt = dvx * tx + dvy * ty;
 
-                // Apply rotational impulse proportional to tangential velocity
-                const rotationImpulse = dvt * 0.005;
+                // Increased rotational impulse for more visible organic rotation
+                const rotationImpulse = dvt * 0.008;
                 p1.rotationSpeed += rotationImpulse;
                 p2.rotationSpeed -= rotationImpulse;
 
@@ -604,14 +631,22 @@
         // ANIMATION LOOP
         // ========================================
         function animate() {
-            ctx.clearRect(0, 0, width, height);
+            // Draw sophisticated black gradient background
+            const gradient = ctx.createLinearGradient(0, 0, 0, height);
+            gradient.addColorStop(0, '#000000');
+            gradient.addColorStop(0.5, '#0a0a0a');
+            gradient.addColorStop(1, '#000000');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, width, height);
 
-            // Draw background division
-            ctx.fillStyle = '#1a1a1a';
-            ctx.fillRect(0, 0, width, floatingAreaHeight);
-
-            ctx.fillStyle = '#2a2a2a';
-            ctx.fillRect(0, sentenceAreaTop, width, height - sentenceAreaTop);
+            // Draw subtle dividing line for sentence area
+            const lineY = height * SENTENCE_VERTICAL_POSITION - 40;
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(width * 0.1, lineY);
+            ctx.lineTo(width * 0.9, lineY);
+            ctx.stroke();
 
             // Update and draw floating letters
             floatingLetters.forEach(particle => {
@@ -737,11 +772,6 @@
                 particle.rotation = particle.targetRotation;
                 particle.fontFamilyTransition = 1.0; // Fully Helvetica
                 particle.isTransitioning = false;
-
-                // Start color fade timer for clicked letters
-                if (particle.wasClicked) {
-                    particle.colorFadeStartTime = Date.now();
-                }
             } else {
                 particle.x = lerp(particle.startX, particle.targetX, eased);
                 particle.y = lerp(particle.startY, particle.targetY, eased);
@@ -751,27 +781,8 @@
                 particle.fontFamilyTransition = lerp(0, 1, eased); // Transition font
             }
 
-            // Handle time-based color fade for clicked/placed letters
-            if (particle.wasClicked && particle.colorFadeStartTime) {
-                const now = Date.now();
-                const elapsed = (now - particle.colorFadeStartTime) / 1000; // seconds
-
-                const FADE_START = 0; // Start fading immediately
-                const FADE_DURATION = 15 + Math.random() * 5; // 15-20 seconds
-
-                if (elapsed > FADE_START) {
-                    const fadeProgress = Math.min((elapsed - FADE_START) / FADE_DURATION, 1.0);
-
-                    // Fade color to white, keep Helvetica
-                    if (particle.originalColor && fadeProgress < 1.0) {
-                        const color = interpolateColorToWhite(particle.originalColor, fadeProgress);
-                        particle.color = color;
-                    } else if (fadeProgress >= 1.0) {
-                        particle.color = 'rgba(255, 255, 255, 1.0)'; // Pure white
-                        // Keep Helvetica (fontFamilyTransition stays at 1.0)
-                    }
-                }
-            }
+            // Color is now managed by updateAllPlacedLetterColors() based on placement order
+            // No time-based fade needed here
         }
 
         function drawLetter(particle) {
@@ -786,29 +797,29 @@
                 "'Helvetica Neue', Helvetica, Arial, sans-serif";
             ctx.font = `${particle.weight} ${particle.size}px ${fontFamily}`;
 
-            // Determine color
+            // Determine color with refined palette
             let fillColor;
 
             if (particle.color) {
                 // If color is assigned (dragged), use it
                 fillColor = particle.color;
             } else if (particle.isFloating && !particle.isDragging) {
-                // Floating letters: white with opacity based on speed
+                // Floating letters: pure white with opacity based on speed for depth
                 const opacity = particle.speedMultiplier ?
-                    Math.min(0.6 + particle.speedMultiplier * 0.15, 1.0) : 1.0;
+                    Math.min(0.7 + particle.speedMultiplier * 0.1, 0.95) : 0.85;
                 fillColor = `rgba(255, 255, 255, ${opacity})`;
 
-                // Vary shadow based on speed
+                // Subtle elegant glow
                 const shadowIntensity = particle.speedMultiplier ?
-                    5 + particle.speedMultiplier * 3 : 10;
+                    3 + particle.speedMultiplier * 2 : 5;
                 ctx.shadowBlur = shadowIntensity;
-                ctx.shadowColor = `rgba(255, 255, 255, ${opacity * 0.4})`;
+                ctx.shadowColor = `rgba(255, 255, 255, ${opacity * 0.2})`;
             } else if (particle.isFloating || particle.isDragging) {
                 // Dragging but no color yet
-                fillColor = '#ffffff';
+                fillColor = 'rgba(255, 255, 255, 0.95)';
             } else {
-                // Placed letters without drag (click interaction)
-                fillColor = '#00ff88';
+                // Placed letters: refined white with subtle fade
+                fillColor = 'rgba(255, 255, 255, 0.85)';
             }
 
             ctx.fillStyle = fillColor;
@@ -823,34 +834,43 @@
         // SENTENCE AREA RENDERING
         // ========================================
         function drawSentenceArea() {
-            const baseY = sentenceAreaTop + (height - sentenceAreaTop) / 2;
+            const baseY = height * SENTENCE_VERTICAL_POSITION;
             const { letterWidth, letterSpacing } = getResponsiveLetterDimensions();
 
-            // Calculate total width
-            const totalWidth = letterStates.length * (letterWidth + letterSpacing);
+            // Enhanced letter spacing for refined typography
+            const refinedSpacing = letterSpacing * 1.5;
+
+            // Calculate total width with refined spacing
+            const totalWidth = letterStates.length * (letterWidth + refinedSpacing);
             let currentX = (width - totalWidth) / 2;
 
             letterStates.forEach((letterState, idx) => {
                 const charX = currentX + letterWidth / 2;
 
-                // Draw placeholder box for letters (not spaces/punctuation)
+                // Draw minimalist placeholder - subtle thin line underneath
                 if (!letterState.isSpace && !letterState.isPunctuation) {
-                    ctx.strokeStyle = letterState.filled ? '#00ff88' : '#444';
-                    ctx.lineWidth = 1;
-                    ctx.strokeRect(currentX, baseY - 20, letterWidth, 40);
+                    const lineY = baseY + 16;
+                    const lineOpacity = letterState.filled ? 0.15 : 0.08;
+
+                    ctx.strokeStyle = `rgba(255, 255, 255, ${lineOpacity})`;
+                    ctx.lineWidth = 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(currentX, lineY);
+                    ctx.lineTo(currentX + letterWidth, lineY);
+                    ctx.stroke();
                 }
 
-                // Draw placed letters or punctuation/spaces
+                // Draw placed letters or punctuation/spaces with refined styling
                 if (letterState.filled && (letterState.isSpace || letterState.isPunctuation)) {
                     const placedConfig = LETTER_CONFIG.placed;
                     ctx.font = `${placedConfig.weight} ${placedConfig.size}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
-                    ctx.fillStyle = '#888';
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
                     ctx.fillText(letterState.char, charX, baseY);
                 }
 
-                currentX += letterWidth + letterSpacing;
+                currentX += letterWidth + refinedSpacing;
             });
 
             // Check completion
@@ -1065,13 +1085,18 @@
             target.stateRef.filled = true;
             target.stateRef.particle = particle;
 
-            // Calculate target position using responsive dimensions
+            // Assign placement order (increments with each placed letter)
+            totalLettersPlaced++;
+            particle.placementOrder = totalLettersPlaced;
+
+            // Calculate target position using responsive dimensions with refined spacing
             const { letterWidth, letterSpacing } = getResponsiveLetterDimensions();
-            const totalWidth = letterStates.length * (letterWidth + letterSpacing);
+            const refinedSpacing = letterSpacing * 1.5;
+            const totalWidth = letterStates.length * (letterWidth + refinedSpacing);
             const startX = (width - totalWidth) / 2;
 
-            const targetX = startX + (target.index * (letterWidth + letterSpacing)) + letterWidth / 2;
-            const baseY = sentenceAreaTop + (height - sentenceAreaTop) / 2;
+            const targetX = startX + (target.index * (letterWidth + refinedSpacing)) + letterWidth / 2;
+            const baseY = height * SENTENCE_VERTICAL_POSITION;
 
             // Start transition
             particle.isFloating = false;
@@ -1093,6 +1118,10 @@
             if (particle.fontFamilyTransition > 0 && particle.fontFamilyTransition < 1) {
                 // Continue the font transition during placement
             }
+
+            // Update ALL placed letter colors based on new placement
+            // This creates the progressive fade effect
+            updateAllPlacedLetterColors();
 
             // Pronounce the letter
             speakLetter(letter);
