@@ -57,6 +57,11 @@
             font-size: 16px;
             color: #888;
         }
+
+        #completedSentence {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-weight: 300;
+        }
     </style>
 </head>
 <body>
@@ -106,6 +111,8 @@
         let letterStates = []; // array of letter position objects
         let floatingLetters = []; // array of floating letter particles
         let allLettersPlaced = false;
+        let germanMaleVoice = null; // German male voice for final sentence
+        let availableVoices = []; // All available voices
 
         // ========================================
         // INITIALIZATION
@@ -114,6 +121,9 @@
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
             canvas.addEventListener('click', handleClick);
+
+            // Load voices
+            loadVoices();
 
             // Step 1: Decompose sentence and create mappings
             decomposeSentence();
@@ -203,15 +213,45 @@
                     const size = LETTER_CONFIG.floating.minSize +
                                 Math.random() * (LETTER_CONFIG.floating.maxSize - LETTER_CONFIG.floating.minSize);
 
+                    // Create unique physics for each letter
+                    // Determine if this letter is "light" or "heavy"
+                    const physicsType = Math.random();
+                    let speedMultiplier, vxRange, vyRange;
+
+                    if (physicsType < 0.3) {
+                        // Light and floaty (30% of letters)
+                        speedMultiplier = 0.3 + Math.random() * 0.4; // 0.3 to 0.7
+                        vxRange = speedMultiplier * (0.5 + Math.random() * 1.5); // Gentle horizontal drift
+                        vyRange = speedMultiplier * (0.5 + Math.random() * 1.5); // Gentle vertical drift
+                    } else if (physicsType < 0.6) {
+                        // Medium speed (30% of letters)
+                        speedMultiplier = 1.0 + Math.random() * 1.0; // 1.0 to 2.0
+                        vxRange = speedMultiplier * (Math.random() * 2.0);
+                        vyRange = speedMultiplier * (Math.random() * 2.0);
+                    } else {
+                        // Heavy and fast (40% of letters)
+                        speedMultiplier = 2.0 + Math.random() * 2.0; // 2.0 to 4.0
+                        vxRange = speedMultiplier * (0.5 + Math.random() * 1.5);
+                        vyRange = speedMultiplier * (0.5 + Math.random() * 1.5);
+                    }
+
+                    // Independent horizontal and vertical velocities
+                    // Randomize direction independently
+                    const vx = (Math.random() - 0.5) * 2 * vxRange;
+                    const vy = (Math.random() - 0.5) * 2 * vyRange;
+
                     const particle = {
                         letter: letter,
                         x: Math.random() * width,
                         y: Math.random() * floatingAreaHeight,
-                        vx: (Math.random() - 0.5) * 4,
-                        vy: (Math.random() - 0.5) * 4,
+                        vx: vx,
+                        vy: vy,
+                        baseSpeed: Math.sqrt(vx * vx + vy * vy), // Store original speed magnitude
+                        speedMultiplier: speedMultiplier, // Store for visual feedback
                         size: size,
                         weight: LETTER_CONFIG.floating.weight,
                         rotation: (Math.random() - 0.5) * 0.3,
+                        rotationSpeed: (Math.random() - 0.5) * 0.02 * speedMultiplier, // Faster letters rotate more
                         isFloating: true,
                         isTransitioning: false,
                         transitionFrame: 0,
@@ -264,17 +304,27 @@
         }
 
         function updateFloatingParticle(particle) {
+            // Update position with unique velocity
             particle.x += particle.vx;
             particle.y += particle.vy;
 
-            // Bounce off walls
+            // Update rotation continuously based on speed
+            particle.rotation += particle.rotationSpeed;
+
+            // Bounce off walls with slight speed variation for chaos
             if (particle.x < 0 || particle.x > width) {
                 particle.vx *= -1;
                 particle.x = Math.max(0, Math.min(width, particle.x));
+
+                // Add tiny random variation on bounce (chaos effect)
+                particle.vx *= 0.98 + Math.random() * 0.04; // 98% to 102% of original
             }
             if (particle.y < 0 || particle.y > floatingAreaHeight) {
                 particle.vy *= -1;
                 particle.y = Math.max(0, Math.min(floatingAreaHeight, particle.y));
+
+                // Add tiny random variation on bounce
+                particle.vy *= 0.98 + Math.random() * 0.04;
             }
         }
 
@@ -304,18 +354,29 @@
             ctx.translate(particle.x, particle.y);
             ctx.rotate(particle.rotation);
 
-            // Use serif for floating (organic), sans-serif for placed (geometric)
-            const fontFamily = particle.isFloating ? 'Georgia, serif' : 'Arial, sans-serif';
+            // Use serif for floating (organic), Helvetica for placed (geometric/mechanical)
+            const fontFamily = particle.isFloating ?
+                'Georgia, serif' :
+                "'Helvetica Neue', Helvetica, Arial, sans-serif";
             ctx.font = `${particle.weight} ${particle.size}px ${fontFamily}`;
-            ctx.fillStyle = particle.isFloating ? '#ffffff' : '#00ff88';
+
+            // Vary opacity based on speed (faster = more opaque, slower = more ghostly)
+            if (particle.isFloating) {
+                const opacity = particle.speedMultiplier ?
+                    Math.min(0.6 + particle.speedMultiplier * 0.15, 1.0) : 1.0;
+                ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+
+                // Vary shadow based on speed
+                const shadowIntensity = particle.speedMultiplier ?
+                    5 + particle.speedMultiplier * 3 : 10;
+                ctx.shadowBlur = shadowIntensity;
+                ctx.shadowColor = `rgba(255, 255, 255, ${opacity * 0.4})`;
+            } else {
+                ctx.fillStyle = '#00ff88';
+            }
+
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-
-            // Add slight organic effect for floating letters
-            if (particle.isFloating) {
-                ctx.shadowBlur = 10;
-                ctx.shadowColor = 'rgba(255, 255, 255, 0.3)';
-            }
 
             ctx.fillText(particle.letter, 0, 0);
             ctx.restore();
@@ -345,7 +406,7 @@
 
                 // Draw placed letters or punctuation/spaces
                 if (letterState.filled && (letterState.isSpace || letterState.isPunctuation)) {
-                    ctx.font = '24px sans-serif';
+                    ctx.font = "300 24px 'Helvetica Neue', Helvetica, Arial, sans-serif";
                     ctx.fillStyle = '#888';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
@@ -454,14 +515,63 @@
         // ========================================
         // WEB SPEECH API
         // ========================================
+        function loadVoices() {
+            if (!window.speechSynthesis) return;
+
+            // Load voices (may take time on some browsers)
+            const loadVoicesAsync = () => {
+                availableVoices = speechSynthesis.getVoices();
+
+                if (availableVoices.length > 0) {
+                    // Find German male voice
+                    germanMaleVoice = availableVoices.find(voice =>
+                        voice.lang.startsWith('de') &&
+                        (voice.name.toLowerCase().includes('male') ||
+                         voice.name.toLowerCase().includes('mann') ||
+                         voice.name.toLowerCase().includes('hans') ||
+                         voice.name.toLowerCase().includes('markus'))
+                    );
+
+                    // Fallback to any German voice
+                    if (!germanMaleVoice) {
+                        germanMaleVoice = availableVoices.find(voice =>
+                            voice.lang.startsWith('de')
+                        );
+                    }
+
+                    console.log('\n=== AVAILABLE VOICES ===');
+                    console.log('German voices:', availableVoices.filter(v => v.lang.startsWith('de')));
+                    console.log('Selected German voice:', germanMaleVoice);
+                }
+            };
+
+            loadVoicesAsync();
+
+            // Voices may load asynchronously
+            if (speechSynthesis.onvoiceschanged !== undefined) {
+                speechSynthesis.onvoiceschanged = loadVoicesAsync;
+            }
+        }
+
         function speakLetter(letter) {
             if (!window.speechSynthesis) return;
 
             const utterance = new SpeechSynthesisUtterance(letter);
-            utterance.lang = 'fr-FR';
-            utterance.rate = 1.0;
-            utterance.pitch = 1.0;
-            utterance.volume = 1.0;
+            utterance.lang = 'de-DE'; // German pronunciation for absurdist effect
+
+            // Randomize pitch and rate for chaotic, varied sounds
+            utterance.pitch = 0.6 + Math.random() * 1.0; // Range: 0.6 to 1.6
+            utterance.rate = 0.7 + Math.random() * 0.8;  // Range: 0.7 to 1.5
+            utterance.volume = 0.8 + Math.random() * 0.2; // Range: 0.8 to 1.0
+
+            // Randomly select from available German voices for variety
+            if (availableVoices.length > 0) {
+                const germanVoices = availableVoices.filter(v => v.lang.startsWith('de'));
+                if (germanVoices.length > 0) {
+                    const randomVoice = germanVoices[Math.floor(Math.random() * germanVoices.length)];
+                    utterance.voice = randomVoice;
+                }
+            }
 
             speechSynthesis.cancel(); // Cancel any ongoing speech
             speechSynthesis.speak(utterance);
@@ -471,10 +581,18 @@
             if (!window.speechSynthesis) return;
 
             const utterance = new SpeechSynthesisUtterance(SENTENCE);
-            utterance.lang = 'fr-FR';
-            utterance.rate = 0.9;
-            utterance.pitch = 1.0;
+            utterance.lang = 'de-DE'; // German pronunciation of French text (absurdist)
+
+            // Mechanical/robotic parameters
+            utterance.pitch = 0.8;  // Lower pitch for mechanical tone
+            utterance.rate = 0.9;   // Steady, deliberate pace
             utterance.volume = 1.0;
+
+            // Use selected German male voice for cold, mechanical delivery
+            if (germanMaleVoice) {
+                utterance.voice = germanMaleVoice;
+                console.log('Speaking with voice:', germanMaleVoice.name);
+            }
 
             speechSynthesis.cancel();
             speechSynthesis.speak(utterance);
