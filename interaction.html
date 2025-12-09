@@ -5,6 +5,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>L'absurde</title>
+
+    <!-- Import map for Firebase SDK -->
+    <script type="importmap">
+    {
+        "imports": {
+            "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
+        }
+    }
+    </script>
+
     <style>
         * {
             margin: 0;
@@ -137,6 +148,9 @@
     </div>
 
     <script type="module">
+        // Import Firebase configuration first to ensure it's initialized
+        import { db } from './firebase-config.js';
+
         // Import Firebase integration
         import { loadCustomLetteringsFromFirebase, getUserId } from './interaction-firebase.js';
 

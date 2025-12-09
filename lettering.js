@@ -357,7 +357,7 @@ function clearCanvas() {
 async function saveAndNext() {
     // Validate that user has drawn something
     if (!currentCharacter) {
-        alert('Please select a character to save.');
+        alert('Please select a letter to save.');
         return;
     }
 

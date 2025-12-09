@@ -5,6 +5,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>L'absurde</title>
+
+    <!-- Import map for Firebase SDK -->
+    <script type="importmap">
+    {
+        "imports": {
+            "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
+        }
+    }
+    </script>
+
     <style>
         * {
             margin: 0;
@@ -369,7 +380,7 @@
 
         <div class="workspace">
             <div id="noSelection" class="no-selection">
-                Select a character from the list to start drawing
+                Select a letter from the list to start drawing
             </div>
 
             <div id="workspaceContent" style="display: none;">
@@ -398,15 +409,23 @@
         </div>
     </div>
 
-    <script type="module" src="/lettering.js"></script>
+    <!-- Firebase SDK (modular) -->
     <script type="module">
-        // Fallback: If Firebase is not configured, show a warning
+        // Import and initialize Firebase before loading app scripts
         import { db } from './firebase-config.js';
 
+        // Make db available globally for debugging
+        window.firebaseDb = db;
+
         if (!db) {
-            console.warn('Firebase is not configured. Please add your Firebase credentials to firebase-config.js');
+            console.warn('Firebase is not configured. App will work in local-only mode.');
+        } else {
+            console.log('Firebase initialized and ready.');
         }
     </script>
+
+    <!-- Main application script -->
+    <script type="module" src="./lettering.js"></script>
 </body>
 
 </html>
