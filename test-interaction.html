@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Interaction</title>
+
+    <!-- Import map for Firebase SDK -->
+    <script type="importmap">
+    {
+        "imports": {
+            "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
+        }
+    }
+    </script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #000;
+            color: #fff;
+        }
+        #status {
+            padding: 20px;
+            margin: 20px 0;
+            border: 1px solid #fff;
+        }
+        .success { color: #0f0; }
+        .error { color: #f00; }
+    </style>
+</head>
+<body>
+    <h1>Interaction Page Debug Test</h1>
+    <div id="status">Testing...</div>
+    <canvas id="canvas" width="400" height="400" style="border: 1px solid white;"></canvas>
+
+    <script type="module">
+        const statusEl = document.getElementById('status');
+
+        function log(msg, isError = false) {
+            console.log(msg);
+            const p = document.createElement('p');
+            p.textContent = msg;
+            p.className = isError ? 'error' : 'success';
+            statusEl.appendChild(p);
+        }
+
+        try {
+            log('✓ Script module started');
+
+            // Test 1: Import Firebase config
+            log('Testing Firebase import...');
+            const { db } = await import('./firebase-config.js');
+            log('✓ Firebase config imported');
+            log('✓ db = ' + (db ? 'initialized' : 'null'));
+
+            // Test 2: Import interaction-firebase
+            log('Testing interaction-firebase import...');
+            const { loadCustomLetteringsFromFirebase, getUserId } = await import('./interaction-firebase.js');
+            log('✓ interaction-firebase imported');
+
+            // Test 3: Get user ID
+            log('Testing getUserId...');
+            const userId = getUserId();
+            log('✓ userId = ' + userId);
+
+            // Test 4: Test canvas
+            log('Testing canvas...');
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = 'white';
+            ctx.font = '40px Georgia';
+            ctx.fillText('Test', 100, 100);
+            log('✓ Canvas works');
+
+            // Test 5: Try to load letterings
+            log('Testing loadCustomLetteringsFromFirebase...');
+            const testChars = ['A', 'B', 'C'];
+            const result = await loadCustomLetteringsFromFirebase(testChars);
+            log('✓ loadCustomLetteringsFromFirebase returned: ' + JSON.stringify(Object.keys(result)));
+
+            log('=== ALL TESTS PASSED ===');
+
+        } catch (error) {
+            log('✗ ERROR: ' + error.message, true);
+            log('Stack: ' + error.stack, true);
+            console.error('Full error:', error);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Simple Test</title>
+    <style>
+        body { background: #000; color: #fff; font-family: Georgia, serif; padding: 40px; }
+        canvas { border: 1px solid white; }
+    </style>
+</head>
+<body>
+    <h1>Simple Interaction Test (No Firebase)</h1>
+    <p id="status">Loading...</p>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const statusEl = document.getElementById('status');
+
+        // Set canvas size
+        canvas.width = window.innerWidth - 80;
+        canvas.height = window.innerHeight - 200;
+
+        statusEl.textContent = 'Canvas initialized: ' + canvas.width + 'x' + canvas.height;
+
+        // Test drawing
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '60px Georgia';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const testText = "Aujourd'hui";
+        ctx.fillText(testText, canvas.width / 2, canvas.height / 2);
+
+        console.log('Canvas test successful');
+        statusEl.textContent += ' - Text rendered successfully!';
+    </script>
+</body>
+</html>

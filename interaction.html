@@ -148,11 +148,32 @@
     </div>
 
     <script type="module">
-        // Import Firebase configuration first to ensure it's initialized
-        import { db } from './firebase-config.js';
+        // CRITICAL: Import Firebase modules with error handling
+        // Wrap in async IIFE to handle import failures gracefully
+        (async () => {
+            let db = null;
+            let loadCustomLetteringsFromFirebase = null;
+            let getUserId = null;
 
-        // Import Firebase integration
-        import { loadCustomLetteringsFromFirebase, getUserId } from './interaction-firebase.js';
+            try {
+                // Import Firebase configuration
+                const firebaseConfig = await import('./firebase-config.js');
+                db = firebaseConfig.db;
+
+                // Import Firebase integration
+                const firebaseIntegration = await import('./interaction-firebase.js');
+                loadCustomLetteringsFromFirebase = firebaseIntegration.loadCustomLetteringsFromFirebase;
+                getUserId = firebaseIntegration.getUserId;
+
+                console.log('✅ Firebase modules loaded successfully');
+            } catch (error) {
+                console.error('⚠️ Failed to load Firebase modules:', error);
+                console.log('📝 App will continue with serif font fallback only');
+
+                // Provide fallback functions
+                getUserId = () => 'fallback_' + Date.now();
+                loadCustomLetteringsFromFirebase = async () => ({});
+            }
 
         // ========================================
         // CONFIGURATION
@@ -1757,6 +1778,23 @@
         } else {
             init();
         }
+
+        })().catch(error => {
+            // Catch any uncaught errors in the async IIFE
+            console.error('❌ Critical error in interaction script:', error);
+            document.body.innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: center; height: 100vh; background: #000; color: #fff; font-family: Arial; text-align: center; padding: 40px;">
+                    <div>
+                        <h1 style="font-size: 32px; margin-bottom: 20px;">Failed to load application</h1>
+                        <p style="font-size: 16px; margin-bottom: 20px;">Error: ${error.message}</p>
+                        <p style="font-size: 14px; opacity: 0.7;">Check the browser console for details</p>
+                        <button onclick="location.href='entry.html'" style="margin-top: 30px; padding: 15px 30px; font-size: 16px; background: transparent; color: white; border: 1px solid white; cursor: pointer;">
+                            ← Back to Entry
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
     </script>
 </body>
 
