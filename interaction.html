@@ -85,6 +85,47 @@
                 padding: 0 40px;
             }
         }
+
+        #resetButton {
+            margin-top: 60px;
+            padding: 20px 40px;
+            font-size: 28px;
+            font-weight: 300;
+            letter-spacing: 0.05em;
+            background: transparent;
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            opacity: 0;
+            transform: translateY(20px);
+            pointer-events: none;
+        }
+
+        #resetButton.show {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        #resetButton:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.6);
+            transform: translateY(-2px);
+        }
+
+        #resetButton:active {
+            transform: translateY(0);
+        }
+
+        @media (max-width: 600px) {
+            #resetButton {
+                font-size: 18px;
+                padding: 15px 30px;
+                margin-top: 40px;
+            }
+        }
     </style>
 </head>
 
@@ -92,6 +133,7 @@
     <canvas id="canvas"></canvas>
     <div class="completion-overlay" id="completionOverlay">
         <div id="completedSentence"></div>
+        <button id="resetButton">Back into Meaninglessness</button>
     </div>
 
     <script>
@@ -1054,11 +1096,43 @@
         function showCompletionOverlay() {
             const overlay = document.getElementById('completionOverlay');
             const sentenceEl = document.getElementById('completedSentence');
+            const resetBtn = document.getElementById('resetButton');
+
             sentenceEl.textContent = SENTENCE;
             overlay.classList.add('show');
 
-            sentenceEl.onclick = () => {
-                speakFullSentence();
+            // Double-tap/click detection
+            let tapCount = 0;
+            let tapTimer = null;
+
+            const handleTap = () => {
+                tapCount++;
+
+                if (tapCount === 1) {
+                    // First tap - speak sentence
+                    speakFullSentence();
+
+                    // Wait for second tap
+                    tapTimer = setTimeout(() => {
+                        tapCount = 0;
+                    }, 500); // 500ms window for double-tap
+                } else if (tapCount === 2) {
+                    // Second tap - show reset button
+                    clearTimeout(tapTimer);
+                    tapCount = 0;
+                    resetBtn.classList.add('show');
+                }
+            };
+
+            sentenceEl.onclick = handleTap;
+            sentenceEl.ontouchend = (e) => {
+                e.preventDefault();
+                handleTap();
+            };
+
+            // Reset button click handler
+            resetBtn.onclick = () => {
+                window.location.href = 'entry.html';
             };
         }
 
