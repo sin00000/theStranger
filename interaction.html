@@ -136,18 +136,20 @@
         <button id="resetButton">Back into Meaninglessness</button>
     </div>
 
-    <script>
+    <script type="module">
+        // Import Firebase integration
+        import { loadCustomLetteringsFromFirebase, getUserId } from './interaction-firebase.js';
+
         // ========================================
         // CONFIGURATION
         // ========================================
         const SENTENCE = "Aujourd'hui, maman est morte. Ou peut-être hier.";
         const FLOATING_AREA_RATIO = 0.75; // 75% for floating, 25% for sentence area
         const SENTENCE_VERTICAL_POSITION = 0.82; // Position sentence at 82% down the viewport
-        const STORAGE_KEY = 'absurde_letterings';
 
         // Custom letterings
-        let customLetterings = {}; // { char: Image }
         let letteringImages = {}; // { char: HTMLImageElement }
+        let userId = null; // Current user's unique ID
 
         const LETTER_CONFIG_BASE = {
             floating: {
@@ -289,17 +291,22 @@
             // Load voices
             loadVoices();
 
-            // Load custom letterings from localStorage
-            await loadCustomLetterings();
-
             // Step 1: Decompose sentence and create mappings
             decomposeSentence();
 
-            // Step 2: Create floating letter particles
+            // Step 2: Create floating letter particles (with default serif rendering)
             createFloatingLetters();
 
-            // Step 3: Start animation loop
+            // Step 3: Start animation loop immediately (will render serif text initially)
             animate();
+
+            // Step 4: Load custom letterings asynchronously (non-blocking)
+            // This will update letteringImages and particles will automatically use them on next frame
+            loadCustomLetterings().then(() => {
+                console.log('Custom letterings loaded - particles will now use custom glyphs');
+            }).catch(err => {
+                console.error('Failed to load custom letterings, continuing with serif fallback:', err);
+            });
 
             console.log('=== LETTER MAPPING ===');
             console.log(letterMapping);
@@ -311,34 +318,49 @@
 
         async function loadCustomLetterings() {
             try {
-                const saved = localStorage.getItem(STORAGE_KEY);
-                if (saved) {
-                    customLetterings = JSON.parse(saved);
+                // Get user ID (fallback to local generation if Firebase fails)
+                try {
+                    userId = getUserId();
+                } catch (e) {
+                    console.warn('Failed to get user ID from Firebase, using fallback:', e);
+                    userId = 'local_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                }
 
-                    // Load each image
-                    const loadPromises = Object.entries(customLetterings).map(([char, dataURL]) => {
-                        return new Promise((resolve, reject) => {
-                            const img = new Image();
-                            img.onload = () => {
-                                letteringImages[char] = img;
-                                resolve();
-                            };
-                            img.onerror = reject;
-                            img.src = dataURL;
-                        });
-                    });
+                // Extract unique characters from sentence
+                const uniqueChars = [];
+                for (let char of SENTENCE) {
+                    if (/[a-zA-ZÀ-ÿ]/.test(char) && !uniqueChars.includes(char)) {
+                        uniqueChars.push(char);
+                    }
+                }
 
-                    await Promise.all(loadPromises);
-                    console.log(`Loaded ${Object.keys(letteringImages).length} custom letterings`);
+                // Try to load letterings from Firebase with priority system:
+                // 1. User's own glyph (userGlyphs.charMap[char])
+                // 2. Random global glyph (from globalGlyphs collection)
+                // 3. undefined (will render as serif font - see drawLetter function)
+                try {
+                    letteringImages = await loadCustomLetteringsFromFirebase(uniqueChars);
+                    console.log(`Loaded ${Object.keys(letteringImages).length} custom letterings from Firebase`);
+                    console.log('Characters without glyphs will render in default serif typeface');
+                } catch (e) {
+                    console.warn('Failed to load letterings from Firebase, using empty set:', e);
+                    letteringImages = {};
+                    console.log('All characters will render in default serif typeface');
                 }
             } catch (e) {
-                console.error('Failed to load custom letterings:', e);
+                console.error('Critical error in loadCustomLetterings, using fallback:', e);
+                letteringImages = {};
+                userId = 'fallback_' + Date.now();
+                console.log('All characters will render in default serif typeface');
             }
         }
 
         function hasCustomLettering(letter) {
             // Check if custom lettering exists for this letter
-            return letteringImages.hasOwnProperty(letter) && letteringImages[letter] !== null;
+            // letteringImages[letter] should be an Image object (not null/undefined)
+            return letteringImages.hasOwnProperty(letter) &&
+                   letteringImages[letter] !== null &&
+                   letteringImages[letter] !== undefined;
         }
 
         function resizeCanvas() {
@@ -906,10 +928,18 @@
             ctx.rotate(particle.rotation);
 
             // Check if custom lettering exists for this character
+            // letteringImages[char] is populated once per session with priority:
+            // 1. User's own glyph (if exists)
+            // 2. Random global glyph (if exists)
+            // 3. undefined (will fall through to serif rendering below)
             const customImage = letteringImages[particle.letter];
 
             // Determine if we should use the custom image or Helvetica fallback
-            const shouldUseCustomImage = customImage && !particle.useHelveticaFallback;
+            // Verify customImage is a valid Image with dimensions
+            const shouldUseCustomImage = customImage &&
+                                         !particle.useHelveticaFallback &&
+                                         customImage.width > 0 &&
+                                         customImage.height > 0;
 
             if (shouldUseCustomImage) {
                 // Draw custom hand-drawn glyph with 1.7x size increase
@@ -991,11 +1021,18 @@
                     ctx.globalAlpha = 1.0;
                 }
             } else {
-                // Fallback to text rendering if no custom glyph exists
-                // Interpolate between Georgia and Helvetica based on fontFamilyTransition
-                const fontFamily = particle.fontFamilyTransition < 0.5 ?
-                    'Georgia, serif' :
-                    "'Helvetica Neue', Helvetica, Arial, sans-serif";
+                // SERIF FALLBACK: Render as text when no custom glyph exists
+                // This happens when:
+                // - letteringImages[char] is undefined (no user glyph AND no global glyph)
+                // - OR particle.useHelveticaFallback is true (temporarily during drag/click)
+                //
+                // Font selection:
+                // - Default: Georgia serif (the original typeface)
+                // - Exception: Helvetica during font transition (when dragging/clicking custom glyphs)
+                const hasAnyCustomLettering = letteringImages[particle.letter] !== undefined;
+                const fontFamily = hasAnyCustomLettering && particle.fontFamilyTransition >= 0.5 ?
+                    "'Helvetica Neue', Helvetica, Arial, sans-serif" :
+                    'Georgia, serif';
                 ctx.font = `${particle.weight} ${particle.size}px ${fontFamily}`;
 
                 // Determine color with refined palette
@@ -1032,6 +1069,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
 
+                // Always render the letter (ensures page is never blank)
                 ctx.fillText(particle.letter, 0, 0);
             }
 
@@ -1699,7 +1737,12 @@
         // ========================================
         // START APPLICATION
         // ========================================
-        init();
+        // Start the application when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
     </script>
 </body>
 
